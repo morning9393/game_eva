@@ -18,6 +18,22 @@ class HUD:
     def toast(self, text, color=C.WHITE, life=70):
         self.toasts.append([text, color, life, life])
 
+    def _blit_chip(self, surf, text, color, topleft=None, topright=None, pad_x=6, pad_y=2):
+        """Render `text` with a translucent dark backdrop chip.
+        Provide exactly one of `topleft` or `topright` for anchoring.
+        """
+        img = self.font_small.render(text, True, color)
+        w = img.get_width() + pad_x * 2
+        h = img.get_height() + pad_y * 2
+        panel = pygame.Surface((w, h), pygame.SRCALPHA)
+        panel.fill((10, 8, 16, 170))
+        if topleft is not None:
+            panel_rect = panel.get_rect(topleft=topleft)
+        else:
+            panel_rect = panel.get_rect(topright=topright)
+        surf.blit(panel, panel_rect)
+        surf.blit(img, img.get_rect(center=panel_rect.center))
+
     def update(self, boss):
         # smooth lerp for bars
         self.boss_hp_display += (boss.hp - self.boss_hp_display) * 0.18
@@ -94,22 +110,36 @@ class HUD:
         for px in (safe_end, warn_end, danger_end):
             pygame.draw.line(surf, C.BLACK, (x + px, y2), (x + px, y2 + bar_h))
 
-        res_lbl = self.font_small.render("RESONANCE", True, C.BONE)
-        surf.blit(res_lbl, (x, y2 + bar_h + 2))
-        hint = self.font_small.render(
-            "break shards to drain - DO NOT hit the king while red", True, (180, 170, 150)
+        lbl_color = (210, 230, 250)
+        lbl_y = y2 + bar_h + 2
+        # translucent dark backdrop behind each piece of text, like the toasts
+        self._blit_chip(surf, "RESONANCE", lbl_color, topleft=(x, lbl_y))
+        self._blit_chip(
+            surf,
+            f"{int(self.res_display)}/100",
+            lbl_color,
+            topright=(x + bar_w, lbl_y),
         )
-        surf.blit(hint, hint.get_rect(midtop=(C.SCREEN_W // 2, y2 + bar_h + 2)))
 
     def draw_toasts(self, surf):
-        cy = C.SCREEN_H - 120
+        cy = C.SCREEN_H - 130
+        pad_x = 14
+        pad_y = 5
         for text, color, life, maxlife in self.toasts[-4:]:
             alpha = int(255 * min(1.0, life / 20.0))
             img = self.font.render(text, True, color)
             img.set_alpha(alpha)
-            rect = img.get_rect(center=(C.SCREEN_W // 2, cy))
-            surf.blit(img, rect)
-            cy += 22
+            w = img.get_width() + pad_x * 2
+            h = img.get_height() + pad_y * 2
+            panel = pygame.Surface((w, h), pygame.SRCALPHA)
+            panel.fill((15, 10, 20, int(200 * alpha / 255)))
+            pygame.draw.rect(
+                panel, (70, 60, 80, int(230 * alpha / 255)), panel.get_rect(), 1
+            )
+            panel_rect = panel.get_rect(center=(C.SCREEN_W // 2, cy))
+            surf.blit(panel, panel_rect)
+            surf.blit(img, img.get_rect(center=(C.SCREEN_W // 2, cy)))
+            cy += h + 4
 
     def draw_controls_hint(self, surf):
         lines = [

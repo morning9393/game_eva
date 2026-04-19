@@ -90,7 +90,9 @@ class Boss:
             self.hp = min(self.max_hp, self.hp + healed)
         else:
             self.hp -= dealt
-            self.flash = 6
+            # Flash is a phase-2 tell: the crown no longer fully absorbs impact.
+            if self.phase == 2:
+                self.flash = 10
         self.resonance = clamp(self.resonance + C.BOSS_RESONANCE_PER_HIT, 0, C.BOSS_MAX_RESONANCE)
         if self.hp <= 0:
             self.hp = 0
@@ -119,11 +121,11 @@ class Boss:
                 ("ring_slam_telegraph", 2),
             ]
         else:
+            # Phase 1: no teleport in the attack pool - teleport is a phase-2 tell.
             pool = [
                 ("sweep_telegraph", 3 if dist < 220 else 1),
                 ("bolt_telegraph", 3),
                 ("summon_shard", 2),
-                ("teleport_out", 2),
             ]
 
         total = sum(w for _, w in pool)

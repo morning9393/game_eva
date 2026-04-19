@@ -67,7 +67,11 @@ game_eva/
     └── constants.py       # tuning knobs (one place to rebalance)
 ```
 
-All art is drawn at runtime on tiny surfaces (12–22 px wide) and scaled up with nearest-neighbor for the pixel feel — **no external asset packs required**. Sprite factories in `game/sprites.py` can be swapped for real pixel-art sheets later without touching gameplay code.
+Pixel-art sprites come from Kenney's **Tiny Dungeon** pack (CC0 public domain) at `assets/kenney_tiny-dungeon/`. Each sprite factory in `game/sprites.py` tries the loaded tile first and falls back to a procedurally drawn version if the pack is missing, so the game runs either way.
+
+## Credits
+
+- Sprite pack: **Tiny Dungeon** by [Kenney](https://kenney.nl/assets/tiny-dungeon) — Creative Commons Zero (CC0).
 
 ## Tuning
 

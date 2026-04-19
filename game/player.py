@@ -26,8 +26,7 @@ class Player:
         # sprites (cached facings)
         self._spr_r = sprites.make_player_sprite(1)
         self._spr_l = sprites.make_player_sprite(-1)
-        self._sword_r = sprites.make_sword(1)
-        self._sword_l = sprites.make_sword(-1)
+        self._sword_pivot = sprites.make_sword_pivot()
         # visuals
         self.bob = 0.0
         self.moving = False
@@ -43,9 +42,10 @@ class Player:
         if self.attack_phase != "active":
             return None
         reach = C.PLAYER_ATTACK_REACH
+        h = C.PLAYER_ATTACK_HEIGHT
         if self.facing == 1:
-            return pygame.Rect(int(self.x), int(self.y) - 14, reach, 28)
-        return pygame.Rect(int(self.x) - reach, int(self.y) - 14, reach, 28)
+            return pygame.Rect(int(self.x), int(self.y) - h // 2, reach, h)
+        return pygame.Rect(int(self.x) - reach, int(self.y) - h // 2, reach, h)
 
     # ---------- control ----------
 
@@ -136,6 +136,40 @@ class Player:
 
     # ---------- rendering ----------
 
+    def swing_angle(self):
+        """Current sword angle in degrees for facing=1 (0=up, -90=right).
+        Returns None if no swing in progress.
+        """
+        if self.attack_phase == "windup":
+            t = 1.0 - self.attack_timer / C.PLAYER_ATTACK_WINDUP  # 0 -> 1
+            angle = 0 + 50 * t                         # 0 -> +50
+        elif self.attack_phase == "active":
+            t = 1.0 - self.attack_timer / C.PLAYER_ATTACK_ACTIVE  # 0 -> 1
+            angle = 50 - 180 * t                       # +50 -> -130
+        elif self.attack_phase == "recover":
+            t = 1.0 - self.attack_timer / C.PLAYER_ATTACK_RECOVER
+            angle = -130 + 40 * t                      # -130 -> -90
+        else:
+            return None
+        if self.facing == -1:
+            angle = -angle
+        return angle
+
+    def blade_tip(self):
+        """World position of the blade tip, for slash particle emission."""
+        ang = self.swing_angle()
+        if ang is None:
+            return None
+        rad = math.radians(ang)
+        # pivot is at the player's hand
+        px = self.x + self.facing * 8
+        py = self.y - 2
+        # blade extends ~32px from the pivot
+        blade_len = 34
+        tx = px - math.sin(rad) * blade_len
+        ty = py - math.cos(rad) * blade_len
+        return tx, ty
+
     def draw(self, surf):
         flicker = (self.iframes // 3) % 2 == 1 and self.iframes > C.PLAYER_DASH_FRAMES
         if flicker:
@@ -145,20 +179,13 @@ class Player:
         rect = spr.get_rect(center=(int(self.x), int(self.y) + bob_y))
         surf.blit(spr, rect)
 
-        # sword during swing
-        if self.attack_phase in ("windup", "active", "recover"):
-            sw = self._sword_r if self.facing == 1 else self._sword_l
-            t = 0.0
-            if self.attack_phase == "windup":
-                t = -0.3
-            elif self.attack_phase == "active":
-                t = 1.0 - self.attack_timer / C.PLAYER_ATTACK_ACTIVE
-            else:
-                t = 1.0 + (1 - self.attack_timer / C.PLAYER_ATTACK_RECOVER) * 0.2
-            offset = int(12 + t * 20)
-            sx = int(self.x) + self.facing * offset
-            sy = int(self.y) - 4
-            surf.blit(sw, sw.get_rect(center=(sx, sy)))
+        # sword swing - rotate through an arc so the motion is clearly a slash
+        ang = self.swing_angle()
+        if ang is not None:
+            pivot_x = int(self.x + self.facing * 8)
+            pivot_y = int(self.y - 2 + bob_y)
+            rotated = pygame.transform.rotate(self._sword_pivot, ang)
+            surf.blit(rotated, rotated.get_rect(center=(pivot_x, pivot_y)))
 
         if self.hit_flash > 0:
             overlay = pygame.Surface(spr.get_size(), pygame.SRCALPHA)

@@ -74,18 +74,35 @@ class Game:
     def _spawn_shard(self, origin=None):
         if len(self.shards) >= C.SHARD_MAX_ON_FIELD:
             return
-        for _ in range(10):
+        # pick a point that's neither too close to the player nor to any
+        # existing shard, with a shrinking separation budget on retries so we
+        # still succeed in cramped arenas
+        MIN_PLAYER_DIST = 90
+        MIN_SHARD_DIST = 140
+        best = None
+        for attempt in range(16):
             if origin:
                 ox, oy = origin
-                x = ox + random.randint(-120, 120)
-                y = oy + random.randint(-100, 100)
+                x = ox + random.randint(-140, 140)
+                y = oy + random.randint(-110, 110)
                 x, y = clamp_to_arena(x, y, pad=50)
             else:
                 x, y = random_point_in_arena(pad=60)
-            # avoid spawning on player
-            if math.hypot(x - self.player.x, y - self.player.y) < 80:
+            if math.hypot(x - self.player.x, y - self.player.y) < MIN_PLAYER_DIST:
                 continue
+            # separation from other shards shrinks slightly per failed attempt
+            threshold = max(70, MIN_SHARD_DIST - attempt * 6)
+            too_close = any(
+                math.hypot(x - s.x, y - s.y) < threshold for s in self.shards
+            )
+            if too_close:
+                best = (x, y)     # remember last candidate as fallback
+                continue
+            best = (x, y)
             break
+        if best is None:
+            return
+        x, y = best
         self.shards.append(Shard(x, y))
         self.particles.spawn_burst(x, y + 14, (120, 90, 70), count=10, speed=2.0, size=3, life=22)
 
@@ -93,6 +110,18 @@ class Game:
         keys = pygame.key.get_pressed()
         self.player.update(keys)
         self.boss.update(self.player)
+
+        # slash trail particles at the blade tip while the swing is active
+        if self.player.attack_phase == "active":
+            tip = self.player.blade_tip()
+            if tip is not None:
+                tx, ty = tip
+                self.particles.spawn_burst(
+                    tx, ty, C.WHITE, count=2, speed=1.2, size=2, life=10
+                )
+                self.particles.spawn_burst(
+                    tx, ty, C.GOLD, count=2, speed=1.6, size=3, life=14
+                )
 
         # boss side-effects
         if self.boss.spawn_shard_request > 0:
@@ -172,10 +201,8 @@ class Game:
                 self.shake = max(self.shake, 9)
                 self.particles.spawn_burst(self.player.x, self.player.y, C.BLOOD, count=14, speed=3.2)
 
-        # boss body contact
-        if math.hypot(self.player.x - self.boss.x, self.player.y - self.boss.y) < 32 and self.player.iframes == 0:
-            if self.player.take_hit(C.BOSS_CONTACT_DAMAGE):
-                self.shake = max(self.shake, 6)
+        # boss body contact no longer damages the player - only his active
+        # attack hitboxes (sweep, bolt, ring slam) and shard pulses can hurt
 
         # bolts
         for b in self.bolts:
