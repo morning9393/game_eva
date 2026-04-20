@@ -66,3 +66,18 @@ CROWN_BOLT_DAMAGE = 1
 
 # UI
 HUD_MARGIN = 16
+
+# ---- Level 2: The Mirrorwright ----
+MIRROR_BOSS_MAX_HP = 280
+MIRROR_ORB_MAX = 80.0
+MIRROR_ORB_SHATTER_P1 = 80.0    # phase 1 auto-shatter threshold
+MIRROR_ORB_SHATTER_P2 = 60.0    # phase 2 shatters sooner
+MIRROR_ORB_DECAY = 0.0          # no passive decay - must be shattered
+MIRROR_AUTO_SHATTER_DAMAGE = 2  # cap damage dealt to player on auto-shatter
+MIRROR_DASH_SHATTER_RADIUS = 62 # dash within this of boss chest to trigger
+MIRROR_DASH_DAMAGE_MULT = 1.5   # queued damage multiplied on dash-shatter
+MIRROR_BOSS_ENRAGE_HP_PCT = 0.4
+
+PHANTOM_SPEED = 3.4
+PHANTOM_DAMAGE = 1
+PLAYER_PATH_HISTORY = 140       # frames of history to record for phantom retrace

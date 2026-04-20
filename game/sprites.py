@@ -196,6 +196,22 @@ def make_floor_tile_alt():
     return spr
 
 
+def make_floor_tile_level2():
+    # Plain sand tinted strongly toward cool blue-grey stone.
+    spr = assets.get(*assets.TILE_FLOOR, scale=FLOOR_SCALE, tint=(95, 125, 170, 255))
+    if spr is None:
+        return _fallback_floor_tile()
+    return spr
+
+
+def make_floor_tile_level2_alt():
+    # Darker variant for irregular stone mottling.
+    spr = assets.get(*assets.TILE_FLOOR_ALT, scale=FLOOR_SCALE, tint=(75, 100, 140, 255))
+    if spr is None:
+        return _fallback_floor_tile()
+    return spr
+
+
 def make_torch_tile():
     return assets.get(*assets.TILE_TORCH, scale=FLOOR_SCALE)
 
@@ -268,6 +284,94 @@ def make_rubble_sprite(variant=0):
         pygame.draw.rect(s, (104, 90, 116), (0, 3, 5, 2))
         pygame.draw.rect(s, (72, 60, 84), (5, 2, 4, 3))
         pygame.draw.rect(s, (132, 118, 146), (5, 2, 4, 1))
+    return pygame.transform.scale(s, (s.get_width() * SCALE, s.get_height() * SCALE))
+
+
+def make_mirrorwright_sprite(phase=1, flash=0):
+    """Level 2 boss. White-haired mage tinted silver-blue for phase 1,
+    violet-shifted for phase 2, with a procedural mirror crown on top."""
+    tint = (180, 210, 250, 255) if phase == 1 else (220, 170, 210, 255)
+    base = assets.get(*assets.TILE_MIRRORWRIGHT, scale=SCALE * 2, tint=tint)
+    if base is None:
+        # fallback: reuse the hollow-king procedural fallback but differently colored
+        return make_boss_sprite(phase, flash)
+
+    out = base.copy()
+    w, h = out.get_size()
+    # floating mirror shards ringing the head like a crown
+    band_w = int(w * 0.5)
+    band_h = max(4, h // 14)
+    bx = (w - band_w) // 2
+    # a thin silver coronet
+    silver = (220, 230, 245)
+    accent = (150, 180, 220) if phase == 1 else (200, 120, 160)
+    pygame.draw.rect(out, silver, (bx, band_h, band_w, band_h // 2))
+    # upright mirror shard triangles
+    n = 5
+    for i in range(n):
+        sx = bx + int((i + 0.5) * band_w / n) - band_h // 2
+        pygame.draw.polygon(
+            out, silver,
+            [(sx, band_h), (sx + band_h // 2, 0), (sx + band_h, band_h)],
+        )
+        # inner tint
+        pygame.draw.polygon(
+            out, accent,
+            [(sx + 1, band_h - 1),
+             (sx + band_h // 2, max(0, band_h // 4)),
+             (sx + band_h - 1, band_h - 1)],
+        )
+    # central mirror gem (oval)
+    jew_x = bx + band_w // 2
+    pygame.draw.ellipse(out, accent, (jew_x - band_h, band_h + 1, band_h * 2, band_h))
+    pygame.draw.ellipse(out, (255, 255, 255), (jew_x - band_h + 2, band_h + 2, band_h * 2 - 4, band_h - 2), 1)
+
+    if flash > 0:
+        overlay = pygame.Surface(out.get_size(), pygame.SRCALPHA)
+        overlay.fill((220, 240, 255, min(180, flash * 24)))
+        out.blit(overlay, (0, 0), special_flags=pygame.BLEND_RGBA_ADD)
+    return out
+
+
+def make_phantom_sprite():
+    """Ghostly silver-blue silhouette of the player, used for phantom reflections."""
+    base = assets.get(*assets.TILE_PLAYER, scale=SCALE, tint=(140, 180, 230, 255))
+    if base is None:
+        base = _fallback_player(1)
+    out = base.copy()
+    out.set_alpha(170)
+    return out
+
+
+def make_mirror_shard_sprite():
+    """Small broken mirror-shard decor prop used in the Mirrorwright room."""
+    s = pygame.Surface((10, 12), pygame.SRCALPHA)
+    pygame.draw.polygon(s, (210, 225, 240), [(5, 0), (9, 5), (6, 11), (2, 8), (1, 3)])
+    pygame.draw.polygon(s, (240, 250, 255), [(5, 1), (7, 4), (5, 7), (3, 4)])
+    pygame.draw.line(s, (150, 170, 200), (2, 3), (8, 10), 1)
+    pygame.draw.rect(s, (60, 60, 78), (1, 11, 8, 1))
+    return pygame.transform.scale(s, (s.get_width() * SCALE, s.get_height() * SCALE))
+
+
+def make_vanity_sprite():
+    """Centerpiece for level 2 - a cracked standing mirror on a stone base."""
+    s = pygame.Surface((20, 30), pygame.SRCALPHA)
+    # stone base
+    pygame.draw.rect(s, (76, 74, 92), (2, 24, 16, 6))
+    pygame.draw.rect(s, (50, 48, 64), (2, 29, 16, 1))
+    # mirror frame
+    pygame.draw.rect(s, (180, 150, 80), (2, 2, 16, 24))
+    pygame.draw.rect(s, (230, 200, 110), (2, 2, 16, 2))
+    pygame.draw.rect(s, (140, 110, 50), (2, 23, 16, 2))
+    # reflective glass
+    pygame.draw.rect(s, (190, 215, 240), (4, 4, 12, 20))
+    # crack pattern
+    pygame.draw.line(s, (100, 120, 150), (4, 10), (10, 15), 1)
+    pygame.draw.line(s, (100, 120, 150), (10, 15), (8, 22), 1)
+    pygame.draw.line(s, (100, 120, 150), (10, 15), (15, 9), 1)
+    # faint ghost reflection
+    pygame.draw.rect(s, (230, 240, 250), (7, 6, 2, 3))
+    pygame.draw.rect(s, (230, 240, 250), (13, 14, 1, 2))
     return pygame.transform.scale(s, (s.get_width() * SCALE, s.get_height() * SCALE))
 
 

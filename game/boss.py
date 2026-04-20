@@ -323,18 +323,28 @@ class Boss:
 
     def draw(self, surf):
         spr = self._sprite()
-        # alpha fade during teleport
+        # --- teleport out: void column rises behind the boss while he collapses ---
+        tp_out_t = tp_in_t = None
         if self.state == "teleport_out":
-            t = 1.0 - (self.state_timer / 28.0)
-            alpha = max(0, int(255 * (1 - t)))
+            tp_out_t = 1.0 - (self.state_timer / 28.0)
+            self._draw_void_column(surf, tp_out_t, emerging=False)
+            alpha = max(0, int(255 * (1 - tp_out_t)))
+            # vertical squash as he collapses (kept in squash_y for sprite transform)
+            squash = max(0.35, 1.0 - tp_out_t * 0.6)
             s2 = spr.copy()
             s2.set_alpha(alpha)
+            w, h = s2.get_size()
+            s2 = pygame.transform.scale(s2, (w, max(8, int(h * squash))))
             spr = s2
         elif self.state == "teleport_in":
-            t = 1.0 - (self.state_timer / 22.0)
-            alpha = int(255 * t)
+            tp_in_t = 1.0 - (self.state_timer / 22.0)
+            self._draw_void_column(surf, tp_in_t, emerging=True)
+            alpha = int(255 * tp_in_t)
+            squash = min(1.0, 0.45 + tp_in_t * 0.75)
             s2 = spr.copy()
             s2.set_alpha(alpha)
+            w, h = s2.get_size()
+            s2 = pygame.transform.scale(s2, (w, max(8, int(h * squash))))
             spr = s2
 
         bob_y = int(math.sin(self.bob) * 3)
@@ -342,6 +352,12 @@ class Boss:
         drawn = pygame.transform.flip(spr, True, False) if flip else spr
         rect = drawn.get_rect(midbottom=(int(self.x), int(self.y) + 44 + bob_y))
         surf.blit(drawn, rect)
+
+        # white flash at the instant of full dissolution / arrival
+        if tp_out_t is not None and tp_out_t > 0.85:
+            self._draw_tp_flash(surf, (200, 160, 240), 1.0 - (1.0 - tp_out_t) / 0.15)
+        elif tp_in_t is not None and tp_in_t < 0.20:
+            self._draw_tp_flash(surf, (200, 160, 240), 1.0 - tp_in_t / 0.20)
 
         # ---- sweep telegraph: crescent arc outline revealing swing path ----
         if self.state == "sweep_telegraph":
@@ -365,6 +381,72 @@ class Boss:
         # ---- active ring slam: jagged shockwave with leading sparks ----
         if self.ring_slam_active and self.ring_slam_radius > 0:
             self._draw_ring_slam(surf)
+
+    # ---------- teleport visuals ----------
+
+    def _draw_void_column(self, surf, t, emerging):
+        """Tall violet rift behind the boss for the Hollow King's Void Step.
+        For emerging=False (teleport_out) the rift OPENS over time; for
+        emerging=True (teleport_in) it SHRINKS while the boss steps out.
+        """
+        cx = int(self.x)
+        top_y = int(self.y) - 96
+        bottom_y = int(self.y) + 44
+        # rift "aperture" - width grows then collapses
+        if emerging:
+            openness = 1.0 - t      # starts wide, closes
+        else:
+            openness = t            # opens during dissolve
+        width = max(2, int(28 * openness))
+        height = bottom_y - top_y
+        col = pygame.Surface((width + 10, height + 10), pygame.SRCALPHA)
+        # dark purple core
+        pygame.draw.ellipse(col, (40, 10, 60, 200), (2, 2, width + 6, height + 6))
+        # violet bleeding edge
+        pygame.draw.ellipse(col, (120, 60, 180, 140), (3, 3, width + 4, height + 4), 3)
+        # bright electric seam along the centre
+        seam_alpha = int(180 + 60 * math.sin(self._anim_tick * 0.4))
+        pygame.draw.line(
+            col, (220, 180, 255, seam_alpha),
+            (width // 2 + 5, 4), (width // 2 + 5, height + 4), 2,
+        )
+        surf.blit(col, col.get_rect(midbottom=(cx, bottom_y + 2)))
+        # ground ripple: a short arc at the foot of the rift
+        ripple_w = int(60 * openness + 14)
+        ripple = pygame.Surface((ripple_w * 2 + 8, 14), pygame.SRCALPHA)
+        pygame.draw.ellipse(
+            ripple, (140, 80, 200, 160),
+            (0, 0, ripple_w * 2 + 8, 14), 2,
+        )
+        surf.blit(ripple, ripple.get_rect(center=(cx, bottom_y)))
+        # jagged lightning cracks radiating outward while mid-dissolve
+        if 0.25 < openness < 0.9:
+            bolt_count = 4
+            for i in range(bolt_count):
+                a = (i / bolt_count) * math.tau + self._anim_tick * 0.05
+                length = int(30 + 20 * openness)
+                x0 = cx + math.cos(a) * 8
+                y0 = (top_y + bottom_y) // 2 + math.sin(a) * 8
+                x1 = cx + math.cos(a) * length
+                y1 = (top_y + bottom_y) // 2 + math.sin(a) * length
+                pygame.draw.line(
+                    surf, (200, 150, 255),
+                    (int(x0), int(y0)), (int(x1), int(y1)), 1,
+                )
+
+    def _draw_tp_flash(self, surf, color, intensity):
+        """A soft radial flash centred on the boss, peaks at intensity=1."""
+        intensity = max(0.0, min(1.0, intensity))
+        r = int(50 + 40 * intensity)
+        flash = pygame.Surface((r * 2 + 8, r * 2 + 8), pygame.SRCALPHA)
+        # outer halo
+        pygame.draw.circle(flash, (*color, int(120 * intensity)), (r + 4, r + 4), r)
+        # hot core
+        pygame.draw.circle(
+            flash, (255, 240, 255, int(220 * intensity)),
+            (r + 4, r + 4), max(1, r - 22),
+        )
+        surf.blit(flash, flash.get_rect(center=(int(self.x), int(self.y) - 20)))
 
     # ---------- rich attack visuals ----------
 

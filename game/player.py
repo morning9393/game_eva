@@ -27,6 +27,8 @@ class Player:
         self._spr_r = sprites.make_player_sprite(1)
         self._spr_l = sprites.make_player_sprite(-1)
         self._sword_pivot = sprites.make_sword_pivot()
+        # rolling position history (for Mirrorwright's phantom reflections)
+        self.path_history = []
         # visuals
         self.bob = 0.0
         self.moving = False
@@ -103,6 +105,11 @@ class Player:
         else:
             self.bob *= 0.9
 
+        # record position history
+        self.path_history.append((self.x, self.y))
+        if len(self.path_history) > C.PLAYER_PATH_HISTORY:
+            self.path_history.pop(0)
+
     # ---------- actions ----------
 
     def try_attack(self):
@@ -127,6 +134,8 @@ class Player:
         return True
 
     def take_hit(self, dmg=1):
+        if getattr(self, "test_mode", False):
+            return False
         if self.iframes > 0:
             return False
         self.hp -= dmg

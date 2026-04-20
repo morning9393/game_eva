@@ -85,3 +85,7 @@ TILE_SWORD_BIG = (8, 10)        # larger sword for boss sweep flair
 TILE_POTION_RED = (9, 7)        # future - healing pickup
 TILE_CHEST_CLOSED = (7, 5)
 TILE_TORCH = (2, 5)             # torch with flame
+# --- Level 2 assets ---
+TILE_MIRRORWRIGHT = (8, 4)      # white-haired mage - the mirror maker
+TILE_FLOOR_LEVEL2 = (3, 7)      # darker stone floor
+TILE_FLOOR_LEVEL2_ALT = (3, 5)  # stone with crack variant
