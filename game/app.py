@@ -16,6 +16,31 @@ from .ui import HUD
 from .utils import circle_rect_collide, clamp, clamp_to_arena, inside_arena, random_point_in_arena
 
 
+class Decor:
+    """Static decorative entity with a feet-based anchor, sorted by y like
+    living entities for fake 2.5D occlusion. Optionally carries a small
+    ground-level collider so the player can bump against it.
+    """
+
+    __slots__ = ("x", "y", "sprite", "emits_flame", "collider", "ground")
+
+    def __init__(self, x, y, sprite, emits_flame=False, collider_size=None, ground=False):
+        self.x = float(x)
+        self.y = float(y)
+        self.sprite = sprite
+        self.emits_flame = emits_flame
+        self.ground = ground  # ground-layer decor draws under everything
+        if collider_size is not None:
+            w, h = collider_size
+            self.collider = pygame.Rect(int(x) - w // 2, int(y) - h, w, h)
+        else:
+            self.collider = None
+
+    def draw(self, surf):
+        rect = self.sprite.get_rect(midbottom=(int(self.x), int(self.y)))
+        surf.blit(self.sprite, rect)
+
+
 class Game:
     def __init__(self):
         pygame.init()
@@ -45,6 +70,73 @@ class Game:
         self.hits_landed = 0
         self.result_timer = 0
         self._showed_danger_hint = False
+        self._build_arena_decor()
+
+    def _build_arena_decor(self):
+        """Generate static backgrounds (floor variants + decor props).
+
+        Uses a fixed seed so the arena looks the same each run and doesn't
+        shimmer between frames.
+        """
+        rng = random.Random(0xC10DE)
+        ax, ay, aw, ah = C.ARENA_X, C.ARENA_Y, C.ARENA_W, C.ARENA_H
+        cx = ax + aw // 2
+        # --- floor layout: plain sand with scattered speckled variants ---
+        tile = self.floor_tile
+        tw, th = tile.get_size()
+        alt_tile = sprites.make_floor_tile_alt()
+        cols = (aw // tw) + 1
+        rows = (ah // th) + 1
+        self._floor_layout = []
+        for ry in range(rows):
+            row = []
+            for rx in range(cols):
+                row.append(alt_tile if rng.random() < 0.18 else tile)
+            self._floor_layout.append(row)
+
+        # --- decor props (feet position anchored at bottom of sprite) ---
+        decor = []
+        throne_spr = sprites.make_throne_sprite()
+        pillar_spr = sprites.make_pillar_sprite()
+        brazier_spr = sprites.make_brazier_sprite()
+
+        # Throne at top-center, feet resting just inside the arena top
+        throne_feet_y = ay + 16 + throne_spr.get_height()
+        decor.append(Decor(cx, throne_feet_y, throne_spr, collider_size=(50, 16)))
+
+        # Flanking pillars along the upper arena (spaced evenly, skipping center)
+        pillar_feet_y = ay + 24 + pillar_spr.get_height()
+        pillar_xs = [ax + 140, ax + 300, ax + aw - 300, ax + aw - 140]
+        for px in pillar_xs:
+            decor.append(Decor(px, pillar_feet_y, pillar_spr, collider_size=(28, 14)))
+
+        # Four corner braziers, set far enough from the walls that the player
+        # can still walk fully around them without being clipped by the arena pad
+        pad = 60
+        brazier_positions = [
+            (ax + pad, ay + pad + brazier_spr.get_height()),
+            (ax + aw - pad, ay + pad + brazier_spr.get_height()),
+            (ax + pad, ay + ah - pad),
+            (ax + aw - pad, ay + ah - pad),
+        ]
+        for bx, by in brazier_positions:
+            decor.append(
+                Decor(bx, by, brazier_spr, emits_flame=True, collider_size=(26, 14))
+            )
+
+        # Scattered rubble along the top and bottom edges - non-blocking ground
+        # layer (drawn under every character so you walk *over* pebbles)
+        rubble_variants = [sprites.make_rubble_sprite(i) for i in range(3)]
+        edge_ys = [ay + 120, ay + ah - 60]
+        for _ in range(10):
+            ry = rng.choice(edge_ys)
+            rx = rng.randint(ax + 80, ax + aw - 80)
+            spr = rng.choice(rubble_variants)
+            decor.append(Decor(rx, ry, spr, ground=True))
+
+        self._decor = decor
+        self._torches = [d for d in decor if d.emits_flame]
+        self._torch_tick = 0
 
     # ---------- input helpers ----------
 
@@ -90,6 +182,13 @@ class Game:
                 x, y = random_point_in_arena(pad=60)
             if math.hypot(x - self.player.x, y - self.player.y) < MIN_PLAYER_DIST:
                 continue
+            # avoid spawning on top of any solid decor (throne, pillars, braziers)
+            shard_footprint = pygame.Rect(int(x) - 16, int(y) - 16, 32, 32)
+            if any(
+                d.collider is not None and d.collider.inflate(16, 16).colliderect(shard_footprint)
+                for d in self._decor
+            ):
+                continue
             # separation from other shards shrinks slightly per failed attempt
             threshold = max(70, MIN_SHARD_DIST - attempt * 6)
             too_close = any(
@@ -106,9 +205,42 @@ class Game:
         self.shards.append(Shard(x, y))
         self.particles.spawn_burst(x, y + 14, (120, 90, 70), count=10, speed=2.0, size=3, life=22)
 
+    def _resolve_player_decor_collision(self):
+        """Push the player out of any solid decor collider using minimum
+        translation along the least-overlapped axis (enables wall sliding).
+        """
+        rect = self.player.rect
+        for d in self._decor:
+            col = d.collider
+            if col is None or not col.colliderect(rect):
+                continue
+            dx_right = col.right - rect.left
+            dx_left = rect.right - col.left
+            dy_down = col.bottom - rect.top
+            dy_up = rect.bottom - col.top
+            min_overlap = min(dx_right, dx_left, dy_down, dy_up)
+            if min_overlap == dx_right:
+                self.player.x += dx_right
+            elif min_overlap == dx_left:
+                self.player.x -= dx_left
+            elif min_overlap == dy_down:
+                self.player.y += dy_down
+            else:
+                self.player.y -= dy_up
+            rect = self.player.rect
+        # re-clamp to arena after pushes
+        self.player.x, self.player.y = clamp_to_arena(
+            self.player.x, self.player.y, pad=18
+        )
+
+    def _anim_frame_mod(self, n):
+        """Helper - tick modulo for staggered particle emissions."""
+        return pygame.time.get_ticks() % n == 0
+
     def _update_fight(self):
         keys = pygame.key.get_pressed()
         self.player.update(keys)
+        self._resolve_player_decor_collision()
         self.boss.update(self.player)
 
         # slash trail particles at the blade tip while the swing is active
@@ -121,6 +253,47 @@ class Game:
                 )
                 self.particles.spawn_burst(
                     tx, ty, C.GOLD, count=2, speed=1.6, size=3, life=14
+                )
+
+        # boss attack-state particle effects (visual richness)
+        if self.boss.state == "teleport_out":
+            # purple/ember motes spiral inward toward the boss as he dissolves
+            for _ in range(3):
+                a = random.uniform(0, math.tau)
+                r = random.uniform(22, 60)
+                px = self.boss.x + math.cos(a) * r
+                py = self.boss.y + math.sin(a) * r - 18
+                # velocity pointing inward
+                vx = -math.cos(a) * 1.6
+                vy = -math.sin(a) * 1.6
+                from .particles import Particle
+                self.particles.parts.append(Particle(px, py, vx, vy, 18, C.VIOLET, size=3))
+        elif self.boss.state == "teleport_in":
+            # reveal burst - ring of motes blossoming outward
+            if self.boss.state_timer in (21, 18, 14):
+                self.particles.spawn_ring(
+                    self.boss.x, self.boss.y - 18, C.VIOLET,
+                    count=18, speed=3.2, size=3, life=20
+                )
+        elif self.boss.state == "summon_shard":
+            # dust kick at the boss's feet as he channels the shard
+            if self._anim_frame_mod(4):
+                self.particles.spawn_burst(
+                    self.boss.x, self.boss.y + 10, (120, 90, 70),
+                    count=1, speed=1.2, size=2, life=12
+                )
+        elif self.boss.state == "bolt_telegraph":
+            # occasional ember sparks pulled toward the crown orb
+            if self._anim_frame_mod(3):
+                a = random.uniform(0, math.tau)
+                r = random.uniform(18, 40)
+                ox = self.boss.x + self.boss.facing * 20
+                oy = self.boss.y - 10
+                px = ox + math.cos(a) * r
+                py = oy + math.sin(a) * r
+                from .particles import Particle
+                self.particles.parts.append(
+                    Particle(px, py, -math.cos(a) * 1.5, -math.sin(a) * 1.5, 16, C.EMBER, size=2)
                 )
 
         # boss side-effects
@@ -224,6 +397,20 @@ class Game:
                     self.shake = max(self.shake, 12)
                     self.hud.toast("Ring slam!", C.BLOOD, 45)
 
+        # torch flame particles - staggered emission so they flicker
+        self._torch_tick += 1
+        if self._torch_tick % 4 == 0:
+            for i, t in enumerate(self._torches):
+                if (self._torch_tick + i * 5) % 9 == 0:
+                    fx = t.x + random.uniform(-1.5, 1.5)
+                    fy = t.y - t.sprite.get_height() + 6
+                    self.particles.spawn_burst(
+                        fx, fy, C.EMBER, count=1, speed=0.6, size=3, life=14
+                    )
+                    self.particles.spawn_burst(
+                        fx, fy - 2, C.GOLD, count=1, speed=0.4, size=2, life=10
+                    )
+
         # particles / hud
         self.particles.update()
         self.hud.update(self.boss)
@@ -276,21 +463,43 @@ class Game:
 
         world = pygame.Surface((C.SCREEN_W, C.SCREEN_H))
         world.fill(C.BLACK)
-        # floor on world surf so shake covers everything
-        tile = self.floor_tile
-        tw, th = tile.get_size()
-        for ty in range(C.ARENA_Y, C.ARENA_Y + C.ARENA_H, th):
-            for tx in range(C.ARENA_X, C.ARENA_X + C.ARENA_W, tw):
-                world.blit(tile, (tx, ty))
+        # varied floor layout (clipped to arena bounds)
+        tw, th = self.floor_tile.get_size()
+        for ry, row in enumerate(self._floor_layout):
+            for rx, tile in enumerate(row):
+                x = C.ARENA_X + rx * tw
+                y = C.ARENA_Y + ry * th
+                if x >= C.ARENA_X + C.ARENA_W or y >= C.ARENA_Y + C.ARENA_H:
+                    continue
+                world.blit(tile, (x, y), pygame.Rect(
+                    0, 0,
+                    min(tw, C.ARENA_X + C.ARENA_W - x),
+                    min(th, C.ARENA_Y + C.ARENA_H - y),
+                ))
         pygame.draw.rect(world, C.STONE_LIGHT, (C.ARENA_X - 4, C.ARENA_Y - 4, C.ARENA_W + 8, C.ARENA_H + 8), 4)
         pygame.draw.rect(world, C.STONE, (C.ARENA_X - 2, C.ARENA_Y - 2, C.ARENA_W + 4, C.ARENA_H + 4), 2)
 
-        # shadows
+        # ground-layer decor (rubble etc.) draws on the floor *before* entities
+        # so the player always walks on top of them
+        for d in self._decor:
+            if d.ground:
+                d.draw(world)
+
+        # shadows for living entities
         for ent in (*self.shards, self.boss, self.player):
             pygame.draw.ellipse(world, (0, 0, 0, 80), (int(ent.x) - 18, int(ent.y) + 16, 36, 10))
+        # small shadow under each tall decor piece
+        for d in self._decor:
+            if d.ground:
+                continue
+            pygame.draw.ellipse(
+                world, (0, 0, 0, 70),
+                (int(d.x) - 14, int(d.y) - 3, 28, 6),
+            )
 
-        # entities sorted by y for fake depth
-        drawables = [*self.shards, self.boss, self.player]
+        # tall decor + entities sorted by feet-y for fake depth
+        drawables = [d for d in self._decor if not d.ground]
+        drawables.extend([*self.shards, self.boss, self.player])
         drawables.sort(key=lambda e: e.y)
         for e in drawables:
             e.draw(world)

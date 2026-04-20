@@ -200,6 +200,92 @@ def make_torch_tile():
     return assets.get(*assets.TILE_TORCH, scale=FLOOR_SCALE)
 
 
+# ---------- procedural arena decor ----------
+
+
+def make_throne_sprite():
+    s = pygame.Surface((18, 26), pygame.SRCALPHA)
+    # backrest
+    pygame.draw.rect(s, (92, 80, 104), (3, 0, 12, 18))
+    pygame.draw.rect(s, (128, 114, 142), (3, 0, 12, 2))        # top edge
+    pygame.draw.rect(s, (68, 56, 82), (2, 1, 1, 16))           # left shadow
+    pygame.draw.rect(s, (68, 56, 82), (15, 1, 1, 16))          # right shadow
+    # gothic spikes
+    pygame.draw.polygon(s, (108, 94, 120), [(3, 0), (5, -3), (7, 0)])
+    pygame.draw.polygon(s, (108, 94, 120), [(11, 0), (13, -3), (15, 0)])
+    # seat cushion + armrests
+    pygame.draw.rect(s, (104, 90, 116), (1, 14, 16, 7))
+    pygame.draw.rect(s, (136, 120, 150), (1, 14, 16, 1))
+    pygame.draw.rect(s, (68, 56, 82), (0, 16, 2, 5))
+    pygame.draw.rect(s, (68, 56, 82), (16, 16, 2, 5))
+    # base platform
+    pygame.draw.rect(s, (72, 60, 86), (0, 22, 18, 4))
+    pygame.draw.rect(s, (48, 38, 58), (0, 25, 18, 1))
+    # gem inlaid on backrest
+    pygame.draw.rect(s, C.BLOOD, (8, 5, 2, 3))
+    s.set_at((8, 5), (255, 180, 180))
+    # gold trim
+    pygame.draw.rect(s, C.GOLD, (3, 0, 2, 1))
+    pygame.draw.rect(s, C.GOLD, (13, 0, 2, 1))
+    pygame.draw.rect(s, C.GOLD, (1, 14, 16, 1))
+    return pygame.transform.scale(s, (s.get_width() * SCALE, s.get_height() * SCALE))
+
+
+def make_pillar_sprite():
+    s = pygame.Surface((12, 44), pygame.SRCALPHA)
+    # base
+    pygame.draw.rect(s, (80, 70, 92), (0, 40, 12, 4))
+    pygame.draw.rect(s, (50, 40, 62), (0, 43, 12, 1))
+    # shaft
+    pygame.draw.rect(s, (108, 96, 122), (2, 5, 8, 35))
+    pygame.draw.rect(s, (80, 70, 92), (2, 5, 1, 35))            # left shadow
+    pygame.draw.rect(s, (140, 128, 154), (9, 5, 1, 35))         # right highlight
+    # fluting (vertical grooves)
+    for gx in (4, 7):
+        pygame.draw.line(s, (80, 70, 92), (gx, 6), (gx, 39))
+    # capital
+    pygame.draw.rect(s, (128, 116, 142), (1, 1, 10, 4))
+    pygame.draw.rect(s, (160, 146, 176), (1, 1, 10, 1))
+    pygame.draw.rect(s, (88, 76, 102), (1, 4, 10, 1))
+    # subtle crack for ancient feel
+    s.set_at((6, 15), (60, 50, 72))
+    s.set_at((6, 16), (60, 50, 72))
+    s.set_at((7, 17), (60, 50, 72))
+    return pygame.transform.scale(s, (s.get_width() * SCALE, s.get_height() * SCALE))
+
+
+def make_rubble_sprite(variant=0):
+    s = pygame.Surface((10, 6), pygame.SRCALPHA)
+    if variant % 3 == 0:
+        pygame.draw.rect(s, (96, 82, 108), (1, 2, 4, 3))
+        pygame.draw.rect(s, (128, 114, 142), (1, 2, 4, 1))
+        pygame.draw.rect(s, (72, 60, 84), (6, 3, 3, 2))
+    elif variant % 3 == 1:
+        pygame.draw.rect(s, (80, 68, 92), (2, 1, 3, 4))
+        pygame.draw.rect(s, (112, 98, 124), (2, 1, 3, 1))
+        pygame.draw.rect(s, (60, 48, 70), (5, 3, 4, 2))
+    else:
+        pygame.draw.rect(s, (104, 90, 116), (0, 3, 5, 2))
+        pygame.draw.rect(s, (72, 60, 84), (5, 2, 4, 3))
+        pygame.draw.rect(s, (132, 118, 146), (5, 2, 4, 1))
+    return pygame.transform.scale(s, (s.get_width() * SCALE, s.get_height() * SCALE))
+
+
+def make_brazier_sprite():
+    s = pygame.Surface((10, 12), pygame.SRCALPHA)
+    # bowl
+    pygame.draw.rect(s, (64, 50, 40), (1, 7, 8, 4))
+    pygame.draw.rect(s, (100, 80, 60), (1, 7, 8, 1))
+    pygame.draw.rect(s, (44, 32, 24), (0, 10, 10, 1))
+    # base pole
+    pygame.draw.rect(s, (52, 40, 30), (4, 11, 2, 1))
+    # flame core (static portion - animated particles added on top)
+    pygame.draw.rect(s, C.EMBER, (3, 3, 4, 5))
+    pygame.draw.rect(s, C.GOLD, (4, 4, 2, 3))
+    pygame.draw.rect(s, (255, 250, 220), (4, 5, 2, 1))
+    return pygame.transform.scale(s, (s.get_width() * SCALE, s.get_height() * SCALE))
+
+
 # ---------- always-procedural sprites (no kenney equivalent) ----------
 
 
