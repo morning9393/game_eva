@@ -105,8 +105,9 @@ class Player:
         else:
             self.bob *= 0.9
 
-        # record position history
-        self.path_history.append((self.x, self.y))
+        # record position + facing history (used by Mirrorwright phantoms
+        # and Echo Lord snapshots)
+        self.path_history.append((self.x, self.y, self.facing))
         if len(self.path_history) > C.PLAYER_PATH_HISTORY:
             self.path_history.pop(0)
 

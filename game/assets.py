@@ -82,6 +82,8 @@ TILE_FLOOR_ALT = (4, 3)         # speckled sand variant
 TILE_SHARD = (2, 8)             # green crystal in stone
 TILE_SWORD = (8, 7)             # short sword (points up in source)
 TILE_SWORD_BIG = (8, 10)        # larger sword for boss sweep flair
+TILE_SWORD_BRONZE = (8, 11)     # bronze ornate blade - Hollow King
+TILE_SWORD_CURVED = (8, 9)      # silver curved scimitar - Mirrorwright
 TILE_POTION_RED = (9, 7)        # future - healing pickup
 TILE_CHEST_CLOSED = (7, 5)
 TILE_TORCH = (2, 5)             # torch with flame
@@ -89,3 +91,9 @@ TILE_TORCH = (2, 5)             # torch with flame
 TILE_MIRRORWRIGHT = (8, 4)      # white-haired mage - the mirror maker
 TILE_FLOOR_LEVEL2 = (3, 7)      # darker stone floor
 TILE_FLOOR_LEVEL2_ALT = (3, 5)  # stone with crack variant
+
+# --- Level 3-5 bosses pick distinct Kenney human tiles ---
+TILE_SOLAR_KING = (7, 3)        # horned warrior - sun king
+TILE_LUNAR_KING = (7, 1)        # robed sage - moon king
+TILE_FATE_WEAVER = (7, 4)       # long-haired woman - the weaver
+TILE_ECHO_LORD = (7, 0)         # purple-hatted figure - echo lord

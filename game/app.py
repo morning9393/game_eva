@@ -8,26 +8,47 @@ import pygame
 from . import constants as C
 from . import sprites
 from .boss import Boss
-from .mirrorwright import Mirrorwright, Phantom
+from .echo_lord import EchoLord, EchoSnapshot
+from .fate_weaver import FatedStrike, FateWeaver, WeftPulse
+from .mirrorwright import MirrorShard, Mirrorwright, Phantom, SilverRainZone
 from .particles import ParticleSystem
 from .player import Player
 from .projectile import CrownBolt
 from .shard import Shard
+from .twin_sovereigns import LunarOrbit, SolarFlare, StarFall, Sunlance, TwinSovereigns
 from .ui import HUD
 from .utils import circle_rect_collide, clamp, clamp_to_arena, inside_arena, random_point_in_arena
 
 LEVELS = [
     {
-        "id": 1,
-        "title": "The Hollow King",
-        "subtitle": "a crownbreaker's vigil",
-        "blurb": "Resonance builds with every strike. Break shards to drain it.",
+        "id": 5,
+        "title": "The Echo Lord",
+        "subtitle": "theatre of past selves",
+        "blurb": "Snapshots of you will slash where you were. Don't repeat your steps.",
+    },
+    {
+        "id": 3,
+        "title": "The Twin Sovereigns",
+        "subtitle": "hall of diurnal flux",
+        "blurb": "Day and night flip every 12s. Only the active king takes damage.",
+    },
+    {
+        "id": 4,
+        "title": "The Fate-Weaver",
+        "subtitle": "loom of severed threads",
+        "blurb": "Threads grant her defense. Slash the threads to bring her low.",
     },
     {
         "id": 2,
         "title": "The Mirrorwright",
         "subtitle": "chamber of quicksilver",
         "blurb": "Hits queue in his mirror orb. Dash-shatter to unload, or explode.",
+    },
+    {
+        "id": 1,
+        "title": "The Hollow King",
+        "subtitle": "a crownbreaker's vigil",
+        "blurb": "Resonance builds with every strike. Break shards to drain it.",
     },
 ]
 
@@ -101,12 +122,31 @@ class Game:
         if self.level_id == 2:
             self.boss = Mirrorwright(cx + 160, cy - 40)
             self.floor_tile = sprites.make_floor_tile_level2()
+        elif self.level_id == 3:
+            self.boss = TwinSovereigns(cx, cy)
+            self.floor_tile = sprites.make_floor_tile()  # sand, tinted later by cycle
+        elif self.level_id == 4:
+            arena_rect = (C.ARENA_X, C.ARENA_Y, C.ARENA_W, C.ARENA_H)
+            self.boss = FateWeaver(cx + 160, cy - 40, arena_rect)
+            self.floor_tile = sprites.make_floor_tile_level2()
+        elif self.level_id == 5:
+            self.boss = EchoLord(cx + 160, cy - 40)
+            self.floor_tile = sprites.make_floor_tile_level2()
         else:
             self.boss = Boss(cx + 160, cy - 40)
             self.floor_tile = sprites.make_floor_tile()
         self.shards = []
         self.bolts = []
         self.phantoms = []
+        self.silver_zones = []      # level 2 - Silver Rain
+        self.mirror_shards = []     # level 2 - Shard Volley
+        self.sunlances = []         # level 3
+        self.lunar_orbits = []      # level 3
+        self.star_falls = []        # level 3 - Star Fall marks
+        self.solar_flares = []      # level 3 - Solar Flare rings
+        self.weaver_strikes = []    # level 4 - Fated Strike marks
+        self.weft_pulses = []       # level 4 - Weft Pulse snapshots
+        self.echo_snapshots = []    # level 5
         self.particles = ParticleSystem()
         self.hud = HUD()
         self.shard_spawn_timer = 180
@@ -128,7 +168,7 @@ class Game:
         # --- floor layout: vary tiles per level ---
         tile = self.floor_tile
         tw, th = tile.get_size()
-        if self.level_id == 2:
+        if self.level_id in (2, 4, 5):
             alt_tile = sprites.make_floor_tile_level2_alt()
         else:
             alt_tile = sprites.make_floor_tile_alt()
@@ -146,23 +186,51 @@ class Game:
         brazier_spr = sprites.make_brazier_sprite()
         pillar_spr = sprites.make_pillar_sprite()
 
+        rubble_variants = [sprites.make_rubble_sprite(i) for i in range(3)]
+
         if self.level_id == 2:
-            # Level 2: a cracked standing mirror at center-back, flanking pillars,
-            # scattered mirror shards on the ground
+            # Level 2: cracked standing mirror + flanking pillars + mirror shards
             mirror_spr = sprites.make_vanity_sprite()
             mirror_feet_y = ay + 16 + mirror_spr.get_height()
             decor.append(Decor(cx, mirror_feet_y, mirror_spr, collider_size=(52, 16)))
-            # two pillars only, further out, to emphasise the open gallery feel
             pillar_feet_y = ay + 24 + pillar_spr.get_height()
             for px in (ax + 180, ax + aw - 180):
                 decor.append(Decor(px, pillar_feet_y, pillar_spr, collider_size=(28, 14)))
-            # mirror shards scattered as ground decor (non-blocking)
             shard_spr = sprites.make_mirror_shard_sprite()
             edge_ys = [ay + 120, ay + ah - 60, ay + ah // 2 + 100]
             for _ in range(10):
                 ry = rng.choice(edge_ys) + rng.randint(-20, 20)
                 rx = rng.randint(ax + 80, ax + aw - 80)
                 decor.append(Decor(rx, ry, shard_spr, ground=True))
+        elif self.level_id == 3:
+            # Level 3: open astronomical hall - throne removed to leave space,
+            # minimal pillars flanking the center
+            pillar_feet_y = ay + 24 + pillar_spr.get_height()
+            for px in (ax + 160, ax + aw - 160):
+                decor.append(Decor(px, pillar_feet_y, pillar_spr, collider_size=(28, 14)))
+            edge_ys = [ay + 120, ay + ah - 60]
+            for _ in range(8):
+                ry = rng.choice(edge_ys)
+                rx = rng.randint(ax + 80, ax + aw - 80)
+                spr = rng.choice(rubble_variants)
+                decor.append(Decor(rx, ry, spr, ground=True))
+        elif self.level_id == 4:
+            # Level 4: empty center (the boss draws her own anchors), just rubble
+            for _ in range(10):
+                ry = rng.randint(ay + 100, ay + ah - 80)
+                rx = rng.randint(ax + 80, ax + aw - 80)
+                spr = rng.choice(rubble_variants)
+                decor.append(Decor(rx, ry, spr, ground=True))
+        elif self.level_id == 5:
+            # Level 5: echo theatre - two pillars, scattered debris
+            pillar_feet_y = ay + 24 + pillar_spr.get_height()
+            for px in (ax + 180, ax + aw - 180):
+                decor.append(Decor(px, pillar_feet_y, pillar_spr, collider_size=(28, 14)))
+            for _ in range(8):
+                ry = rng.randint(ay + 120, ay + ah - 60)
+                rx = rng.randint(ax + 80, ax + aw - 80)
+                spr = rng.choice(rubble_variants)
+                decor.append(Decor(rx, ry, spr, ground=True))
         else:
             # Level 1: cursed throne room
             throne_spr = sprites.make_throne_sprite()
@@ -172,7 +240,6 @@ class Game:
             pillar_xs = [ax + 140, ax + 300, ax + aw - 300, ax + aw - 140]
             for px in pillar_xs:
                 decor.append(Decor(px, pillar_feet_y, pillar_spr, collider_size=(28, 14)))
-            rubble_variants = [sprites.make_rubble_sprite(i) for i in range(3)]
             edge_ys = [ay + 120, ay + ah - 60]
             for _ in range(10):
                 ry = rng.choice(edge_ys)
@@ -395,7 +462,7 @@ class Game:
                         self.hud.toast("Shard shattered - Resonance drained", C.GOLD, 50)
 
     def _update_level2_specifics(self):
-        """Mirrorwright: mirror orb, dash-shatter, phantoms."""
+        """Mirrorwright: mirror orb, dash-shatter, phantoms, silver rain, shard volley."""
         # boss phantom request -> spawn phantom that retraces player's path
         if self.boss.phantom_request:
             self.boss.phantom_request = False
@@ -405,6 +472,51 @@ class Game:
                 (200, 220, 240), count=16, speed=3.2, size=3, life=22
             )
             self.shake = max(self.shake, 4)
+        # Silver Rain: spawn zones at queued positions
+        if self.boss.silver_rain_request is not None:
+            for (zx, zy) in self.boss.silver_rain_request:
+                self.silver_zones.append(SilverRainZone(zx, zy))
+                self.particles.spawn_burst(
+                    zx, zy, (200, 220, 240),
+                    count=8, speed=2.0, size=3, life=18,
+                )
+            self.boss.silver_rain_request = None
+        # Shard Volley: fire shards from boss hand position
+        if self.boss.volley_request is not None:
+            ox = self.boss.x + self.boss.facing * 20
+            oy = self.boss.y - 14
+            for dx, dy in self.boss.volley_request:
+                self.mirror_shards.append(MirrorShard(ox, oy, dx, dy))
+            self.boss.volley_request = None
+            self.particles.spawn_burst(
+                ox, oy, (230, 245, 255),
+                count=14, speed=3.4, size=3, life=22,
+            )
+            self.shake = max(self.shake, 4)
+        # update silver rain zones
+        for z in self.silver_zones:
+            z.update()
+            if z.phase == "active" and not z.has_hit and z.hits_player(self.player):
+                if self.player.take_hit(1):
+                    z.has_hit = True
+                    self.shake = max(self.shake, 6)
+                    self.particles.spawn_burst(
+                        self.player.x, self.player.y, (230, 245, 255),
+                        count=14, speed=3.0,
+                    )
+        self.silver_zones = [z for z in self.silver_zones if z.alive]
+        # update mirror shards
+        for s in self.mirror_shards:
+            s.update()
+            if s.alive and math.hypot(s.x - self.player.x, s.y - self.player.y) < 18 + s.radius \
+                    and self.player.iframes == 0:
+                if self.player.take_hit(C.MIRROR_SHARD_DAMAGE):
+                    s.alive = False
+                    self.shake = max(self.shake, 6)
+                    self.particles.spawn_burst(
+                        s.x, s.y, (230, 245, 255), count=12, speed=2.8,
+                    )
+        self.mirror_shards = [s for s in self.mirror_shards if s.alive]
         # advance phantoms
         for p in self.phantoms:
             p.update()
@@ -451,6 +563,294 @@ class Game:
                 count=30, speed=4.5, size=4, life=26
             )
 
+    def _update_level3_specifics(self):
+        """Twin Sovereigns: cycle + sunlance + lunar orbit + solar flare + star fall."""
+        # boss-queued attacks
+        if self.boss.sunlance_request is not None:
+            sx, sy, dx, dy = self.boss.sunlance_request
+            self.sunlances.append(Sunlance(sx, sy, dx, dy))
+            self.boss.sunlance_request = None
+            self.particles.spawn_burst(sx, sy, (255, 220, 120), count=14, speed=3.2)
+        if self.boss.lunar_orbit_request:
+            self.lunar_orbits.append(LunarOrbit(self.player.x, self.player.y))
+            self.boss.lunar_orbit_request = False
+            self.particles.spawn_ring(
+                self.player.x, self.player.y, (180, 200, 240),
+                count=16, speed=2.4, size=3, life=22,
+            )
+        if self.boss.solar_flare_request is not None:
+            fx, fy = self.boss.solar_flare_request
+            self.solar_flares.append(SolarFlare(fx, fy))
+            self.boss.solar_flare_request = None
+            self.particles.spawn_burst(
+                fx, fy, (255, 200, 110),
+                count=16, speed=2.6, size=3, life=24,
+            )
+        if self.boss.star_fall_request is not None:
+            for (tx, ty) in self.boss.star_fall_request:
+                self.star_falls.append(StarFall(tx, ty))
+                self.particles.spawn_burst(
+                    tx, ty, (150, 170, 220),
+                    count=8, speed=2.0, size=3, life=18,
+                )
+            self.boss.star_fall_request = None
+        # advance sunlances and lunar orbits
+        for s in self.sunlances:
+            s.update()
+            if s.alive and not s.has_hit and s.hits_rect(self.player.rect):
+                if self.player.take_hit(1):
+                    s.has_hit = True
+                    self.shake = max(self.shake, 9)
+                    self.particles.spawn_burst(
+                        self.player.x, self.player.y, C.BLOOD,
+                        count=14, speed=3.0,
+                    )
+        self.sunlances = [s for s in self.sunlances if s.alive]
+        for o in self.lunar_orbits:
+            o.update(self.player)
+            if o.alive and o.hits_player(self.player):
+                if self.player.take_hit(1):
+                    o.alive = False
+                    self.shake = max(self.shake, 8)
+                    self.particles.spawn_burst(
+                        o.x, o.y, (180, 200, 240), count=18, speed=3.2,
+                    )
+        self.lunar_orbits = [o for o in self.lunar_orbits if o.alive]
+        # advance solar flares
+        for f in self.solar_flares:
+            f.update()
+            if f.alive and not f.has_hit and f.hits_player(self.player):
+                if self.player.take_hit(1):
+                    f.has_hit = True
+                    self.shake = max(self.shake, 9)
+                    self.particles.spawn_burst(
+                        self.player.x, self.player.y, (255, 180, 80),
+                        count=14, speed=3.0,
+                    )
+        self.solar_flares = [f for f in self.solar_flares if f.alive]
+        # advance star falls
+        for sf in self.star_falls:
+            sf.update()
+            if sf.alive and not sf.has_hit and sf.hits_player(self.player):
+                if self.player.take_hit(1):
+                    sf.has_hit = True
+                    self.shake = max(self.shake, 8)
+                    self.particles.spawn_burst(
+                        self.player.x, self.player.y, (130, 150, 220),
+                        count=14, speed=3.0,
+                    )
+        self.star_falls = [sf for sf in self.star_falls if sf.alive]
+        # player sword -> ONLY the active king takes damage
+        arect = self.player.attack_rect()
+        if arect is not None:
+            for king in (self.boss.solar, self.boss.lunar):
+                if not king.alive:
+                    continue
+                if id(king) in self.player.attack_hit_set:
+                    continue
+                if arect.colliderect(king.rect):
+                    result = king.receive_player_hit(C.PLAYER_ATTACK_DAMAGE)
+                    self.player.attack_hit_set.add(id(king))
+                    if result["band"] == "intangible":
+                        self.hud.toast(
+                            f"{king.role.upper()} KING is spectral!",
+                            (180, 180, 220), 40,
+                        )
+                        self.particles.spawn_burst(
+                            king.x, king.y - 20, (180, 200, 240),
+                            count=8, speed=2.0,
+                        )
+                    else:
+                        self.particles.spawn_burst(
+                            king.x, king.y - 20, C.GOLD if king.role == "solar" else (180, 200, 240),
+                            count=14, speed=3.0,
+                        )
+                        self.shake = max(self.shake, 3)
+
+    def _update_level4_specifics(self):
+        """Fate-Weaver: threads, thread defense, pull, fated strike, weft pulse."""
+        # complete any newly woven player-anchored threads
+        self.boss.complete_player_anchored_thread(self.player)
+        # queued secondary skills
+        if self.boss.fated_strike_request is not None:
+            fx, fy = self.boss.fated_strike_request
+            self.weaver_strikes.append(FatedStrike(fx, fy))
+            self.boss.fated_strike_request = None
+            self.particles.spawn_burst(
+                fx, fy, (220, 170, 250),
+                count=10, speed=2.0, size=3, life=18,
+            )
+        if self.boss.weft_pulse_request:
+            self.boss.weft_pulse_request = False
+            # capture current thread endpoints at the moment of cast
+            lines = [
+                (t.ax, t.ay, t.bx, t.by)
+                for t in self.boss.threads if t.alive
+            ]
+            if lines:
+                self.weft_pulses.append(WeftPulse(lines))
+                self.shake = max(self.shake, 4)
+                self.hud.toast("She tightens the weft!", (220, 180, 240), 55)
+        # advance fated strikes
+        for fs in self.weaver_strikes:
+            fs.update()
+            if fs.alive and not fs.has_hit and fs.hits_player(self.player):
+                if self.player.take_hit(1):
+                    fs.has_hit = True
+                    self.shake = max(self.shake, 10)
+                    self.particles.spawn_burst(
+                        self.player.x, self.player.y, (200, 130, 240),
+                        count=16, speed=3.2,
+                    )
+        self.weaver_strikes = [fs for fs in self.weaver_strikes if fs.alive]
+        # advance weft pulses
+        for wp in self.weft_pulses:
+            wp.update()
+            if wp.alive and not wp.has_hit and wp.hits_player(self.player):
+                if self.player.take_hit(1):
+                    wp.has_hit = True
+                    self.shake = max(self.shake, 9)
+                    self.particles.spawn_burst(
+                        self.player.x, self.player.y, (255, 160, 230),
+                        count=14, speed=3.0,
+                    )
+        self.weft_pulses = [wp for wp in self.weft_pulses if wp.alive]
+        # pull attack - damage if on the pull line during dash
+        line_rect = self.boss.pull_line_rect()
+        if line_rect is not None and self.boss.pull_active and line_rect.colliderect(self.player.rect):
+            if self.player.take_hit(1):
+                self.shake = max(self.shake, 9)
+                self.particles.spawn_burst(
+                    self.player.x, self.player.y, (255, 120, 120),
+                    count=14, speed=3.0,
+                )
+        # player sword -> boss or threads (weavers AND threads are hittable)
+        arect = self.player.attack_rect()
+        if arect is not None:
+            if id(self.boss) not in self.player.attack_hit_set and arect.colliderect(self.boss.rect):
+                result = self.boss.receive_player_hit(C.PLAYER_ATTACK_DAMAGE)
+                self.player.attack_hit_set.add(id(self.boss))
+                self.hits_landed += 1
+                if result["dealt"] == 0:
+                    self.hud.toast("Her threads absorb the strike.", (220, 180, 240), 60)
+                    self.particles.spawn_burst(
+                        self.boss.x, self.boss.y - 20, (200, 160, 220),
+                        count=10, speed=2.4,
+                    )
+                else:
+                    self.particles.spawn_burst(
+                        self.boss.x, self.boss.y - 20, (240, 200, 240),
+                        count=14, speed=3.0,
+                    )
+                    self.shake = max(self.shake, 3)
+            # threads - attackable to strip defense
+            for t in self.boss.threads:
+                if not t.alive:
+                    continue
+                if id(t) in self.player.attack_hit_set:
+                    continue
+                # distance from player's attack hitbox center to thread
+                acx = arect.centerx
+                acy = arect.centery
+                if t.distance_to(acx, acy) < 24:
+                    broken = t.take_hit(C.PLAYER_ATTACK_DAMAGE)
+                    self.player.attack_hit_set.add(id(t))
+                    cx, cy, _ = t.closest_point(acx, acy)
+                    self.particles.spawn_burst(
+                        cx, cy, (220, 180, 240), count=8, speed=2.2,
+                    )
+                    if broken:
+                        self.particles.spawn_ring(
+                            cx, cy, (220, 180, 240),
+                            count=16, speed=3.0, size=3, life=22,
+                        )
+                        self.shake = max(self.shake, 4)
+                        self.hud.toast("Thread snapped!", (220, 180, 240), 45)
+
+    def _update_level5_specifics(self):
+        """Echo Lord: snapshots, cascade chain, memory surge."""
+        # spawn snapshots from player history
+        if self.boss.echo_spawn_request > 0:
+            for _ in range(self.boss.echo_spawn_request):
+                if len(self.echo_snapshots) >= C.ECHO_MAX_ON_FIELD:
+                    break
+                hist = self.player.path_history
+                if not hist:
+                    break
+                idx = random.randint(0, max(0, len(hist) - 1) // 2)
+                entry = hist[idx]
+                px, py, facing = entry if len(entry) == 3 else (entry[0], entry[1], self.player.facing)
+                self.echo_snapshots.append(EchoSnapshot(px, py, facing))
+            self.boss.echo_spawn_request = 0
+        # Cascade Echo: 4 snapshots spread across history, staggered warnings
+        if self.boss.cascade_request:
+            self.boss.cascade_request = False
+            hist = self.player.path_history
+            if hist:
+                n = C.CASCADE_ECHO_COUNT
+                step = max(1, len(hist) // n)
+                for i in range(n):
+                    idx = min(len(hist) - 1, i * step)
+                    entry = hist[idx]
+                    px, py, facing = (
+                        entry if len(entry) == 3
+                        else (entry[0], entry[1], self.player.facing)
+                    )
+                    e = EchoSnapshot(px, py, facing)
+                    # stagger the warning start so they fire in sequence
+                    e.timer = C.ECHO_WARNING_FRAMES + i * C.CASCADE_ECHO_STAGGER
+                    self.echo_snapshots.append(e)
+                self.hud.toast("Echo cascade!", (255, 160, 180), 55)
+                self.particles.spawn_ring(
+                    self.boss.x, self.boss.y - 20, (255, 140, 180),
+                    count=22, speed=3.2, size=3, life=24,
+                )
+                self.shake = max(self.shake, 5)
+        # Memory Surge: when telegraph completes, force every echo in warning
+        # state to immediately begin slashing.
+        if self.boss.memory_surge_active:
+            self.boss.memory_surge_active = False
+            surged = 0
+            for e in self.echo_snapshots:
+                if e.state == "warning":
+                    e.state = "slash"
+                    e.timer = C.ECHO_SLASH_FRAMES
+                    e.has_hit = False
+                    surged += 1
+            if surged:
+                self.hud.toast(f"Memory surge! {surged} echoes", C.BLOOD, 65)
+                self.shake = max(self.shake, 10)
+                self.particles.spawn_ring(
+                    self.boss.x, self.boss.y - 20, (255, 80, 120),
+                    count=30, speed=4.2, size=4, life=28,
+                )
+        # advance snapshots
+        for e in self.echo_snapshots:
+            e.update()
+            if e.state == "slash" and not e.has_hit:
+                sr = e.slash_rect()
+                if sr is not None and sr.colliderect(self.player.rect):
+                    if self.player.take_hit(1):
+                        e.has_hit = True
+                        self.shake = max(self.shake, 8)
+                        self.particles.spawn_burst(
+                            self.player.x, self.player.y, (255, 120, 140),
+                            count=12, speed=3.0,
+                        )
+        self.echo_snapshots = [e for e in self.echo_snapshots if e.alive]
+        # player sword -> boss
+        arect = self.player.attack_rect()
+        if arect is not None:
+            if id(self.boss) not in self.player.attack_hit_set and arect.colliderect(self.boss.rect):
+                result = self.boss.receive_player_hit(C.PLAYER_ATTACK_DAMAGE)
+                self.player.attack_hit_set.add(id(self.boss))
+                self.hits_landed += 1
+                self.particles.spawn_burst(
+                    self.boss.x, self.boss.y - 20, (240, 180, 200),
+                    count=14, speed=3.0,
+                )
+                self.shake = max(self.shake, 3)
+
     def _update_fight(self):
         keys = pygame.key.get_pressed()
         self.player.update(keys)
@@ -468,6 +868,23 @@ class Game:
                 self.particles.spawn_burst(
                     tx, ty, C.GOLD, count=2, speed=1.6, size=3, life=14
                 )
+
+        # boss sweep tip sparks (themed per boss)
+        if self.boss.state == "sweep" and hasattr(self.boss, "sweep_blade_angle"):
+            is_mirror = hasattr(self.boss, "orb")
+            sweep_dur = 20.0 if is_mirror else 22.0
+            t = 1.0 - self.boss.state_timer / sweep_dur
+            ang = math.radians(self.boss.sweep_blade_angle(t))
+            tip_x = self.boss.x + self.boss.facing * 10 + math.cos(ang) * 96
+            tip_y = self.boss.y - 20 + math.sin(ang) * 96
+            core_col = (240, 250, 255) if is_mirror else (255, 240, 190)
+            body_col = (200, 225, 250) if is_mirror else C.GOLD
+            self.particles.spawn_burst(
+                tip_x, tip_y, core_col, count=2, speed=1.4, size=2, life=12
+            )
+            self.particles.spawn_burst(
+                tip_x, tip_y, body_col, count=2, speed=1.8, size=3, life=16
+            )
 
         # boss attack-state particle effects (visual richness)
         if self.boss.state == "teleport_out":
@@ -565,6 +982,12 @@ class Game:
         # level-specific boss side effects and player attack resolution
         if self.level_id == 2:
             self._update_level2_specifics()
+        elif self.level_id == 3:
+            self._update_level3_specifics()
+        elif self.level_id == 4:
+            self._update_level4_specifics()
+        elif self.level_id == 5:
+            self._update_level5_specifics()
         else:
             self._update_level1_specifics()
 
@@ -709,9 +1132,31 @@ class Game:
         # bolts above
         for b in self.bolts:
             b.draw(world)
-        # phantoms (level 2) - ghostly overlay on top of entities
+        # phantoms (level 2)
         for p in self.phantoms:
             p.draw(world)
+        # level 2 skills: silver rain + mirror shards
+        for z in self.silver_zones:
+            z.draw(world)
+        for ms in self.mirror_shards:
+            ms.draw(world)
+        # level 3: sunlances + lunar orbits + solar flares + star falls
+        for s in self.sunlances:
+            s.draw(world)
+        for o in self.lunar_orbits:
+            o.draw(world)
+        for f in self.solar_flares:
+            f.draw(world)
+        for sf in self.star_falls:
+            sf.draw(world)
+        # level 4: fated strikes + weft pulses
+        for fs in self.weaver_strikes:
+            fs.draw(world)
+        for wp in self.weft_pulses:
+            wp.draw(world)
+        # level 5: echo snapshots
+        for e in self.echo_snapshots:
+            e.draw(world)
 
         # particles
         self.particles.draw(world)
@@ -738,6 +1183,12 @@ class Game:
             if self.level_id == 2:
                 text = "THE MIRROR CRACKS"
                 color = (230, 170, 200)
+            elif self.level_id == 4:
+                text = "THE LOOM SHUDDERS"
+                color = (230, 180, 240)
+            elif self.level_id == 5:
+                text = "THE PAST UNRAVELS"
+                color = (250, 140, 160)
             else:
                 text = "THE CROWN IGNITES"
                 color = C.EMBER
@@ -765,17 +1216,18 @@ class Game:
             self.screen.set_at((x, y), c)
 
         title = self.font_big.render("CROWN  OF  HOLLOW", True, C.GOLD)
-        self.screen.blit(title, title.get_rect(center=(C.SCREEN_W // 2, 110)))
+        self.screen.blit(title, title.get_rect(center=(C.SCREEN_W // 2, 74)))
         subtitle = self.font.render("choose your trial", True, C.BONE)
-        self.screen.blit(subtitle, subtitle.get_rect(center=(C.SCREEN_W // 2, 158)))
+        self.screen.blit(subtitle, subtitle.get_rect(center=(C.SCREEN_W // 2, 114)))
 
-        # level cards
-        card_w = 520
-        card_h = 86
+        # level cards - compact layout so all 5 fit without scrolling
+        card_w = 560
+        card_h = 64
         card_x = (C.SCREEN_W - card_w) // 2
-        y0 = 200
+        gap = 8
+        y0 = 146
         for i, lvl in enumerate(LEVELS):
-            card_y = y0 + i * (card_h + 18)
+            card_y = y0 + i * (card_h + gap)
             selected = (i == self.title_selection)
             panel = pygame.Surface((card_w, card_h), pygame.SRCALPHA)
             bg_col = (40, 30, 46, 220) if selected else (22, 18, 28, 180)
@@ -783,20 +1235,21 @@ class Game:
             border_col = (236, 196, 104) if selected else (80, 70, 90)
             pygame.draw.rect(panel, border_col, panel.get_rect(), 2 if selected else 1)
             self.screen.blit(panel, (card_x, card_y))
-            num = self.font.render(str(lvl["id"]), True,
+            # display number matches the card's position in the trial order,
+            # independent of the internal level_id used for mechanic dispatch
+            num = self.font.render(str(i + 1), True,
                                    C.GOLD if selected else (150, 140, 130))
-            self.screen.blit(num, (card_x + 18, card_y + 14))
+            self.screen.blit(num, (card_x + 14, card_y + 8))
             title_col = (240, 220, 160) if selected else C.BONE
             name_img = self.font.render(lvl["title"], True, title_col)
-            self.screen.blit(name_img, (card_x + 54, card_y + 14))
+            self.screen.blit(name_img, (card_x + 48, card_y + 8))
             sub_img = self.font_small.render(lvl["subtitle"], True,
                                              (200, 180, 150) if selected else (140, 130, 120))
-            self.screen.blit(sub_img, (card_x + 54, card_y + 40))
+            self.screen.blit(sub_img, (card_x + 48, card_y + 30))
             blurb_img = self.font_small.render(lvl["blurb"], True,
                                               (220, 210, 190) if selected else (120, 110, 100))
-            self.screen.blit(blurb_img, (card_x + 54, card_y + 60))
+            self.screen.blit(blurb_img, (card_x + 48, card_y + 46))
             if selected:
-                # pulsing chevron on the left
                 pulse = (math.sin(pygame.time.get_ticks() * 0.005) + 1) * 0.5
                 cx = card_x - 10 - int(pulse * 4)
                 cy = card_y + card_h // 2
@@ -877,17 +1330,26 @@ class Game:
         overlay.fill((0, 0, 0, 170))
         self.screen.blit(overlay, (0, 0))
         if self.state == "win":
-            if self.level_id == 2:
-                title_text, title_color = "THE MIRROR CLEARS", (220, 235, 250)
-                sub_text = "the reflections rest.  R to fight again, ESC for menu."
-            else:
-                title_text, title_color = "THE CROWN SHATTERS", C.GOLD
-                sub_text = "his soul is free.  R to fight again, ESC for menu."
+            win_msgs = {
+                1: ("THE CROWN SHATTERS", C.GOLD, "his soul is free.  R to fight again, ESC for menu."),
+                2: ("THE MIRROR CLEARS", (220, 235, 250), "the reflections rest.  R to fight again, ESC for menu."),
+                3: ("THE TWIN HORIZONS DIM", (220, 200, 220), "day and night rest.  R to fight again, ESC for menu."),
+                4: ("THE THREADS ARE SEVERED", (230, 200, 240), "her loom is stilled.  R to fight again, ESC for menu."),
+                5: ("THE ECHOES FADE", (255, 180, 200), "silence at last.  R to fight again, ESC for menu."),
+            }
+            title_text, title_color, sub_text = win_msgs.get(
+                self.level_id, win_msgs[1]
+            )
         else:
-            if self.level_id == 2:
-                title_text, title_color = "THE ORB CONSUMES YOU", C.BLOOD
-            else:
-                title_text, title_color = "YOU FALL BEFORE THE KING", C.BLOOD
+            lose_msgs = {
+                1: "YOU FALL BEFORE THE KING",
+                2: "THE ORB CONSUMES YOU",
+                3: "THE TWINS OUTLAST YOU",
+                4: "YOU ARE WOUND IN HER THREADS",
+                5: "YOUR OWN PAST UNDOES YOU",
+            }
+            title_text = lose_msgs.get(self.level_id, lose_msgs[1])
+            title_color = C.BLOOD
             sub_text = "R to try again, ESC for menu."
         self._blit_text_panel(
             title_text, title_color, self.font_big,

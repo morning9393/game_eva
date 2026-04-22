@@ -41,7 +41,11 @@ class HUD:
 
     def update(self, boss):
         # smooth lerp for bars
-        self.boss_hp_display += (boss.hp - self.boss_hp_display) * 0.18
+        target_hp = boss.hp
+        # for twin sovereigns, treat the aggregate HP for the lerp
+        if hasattr(boss, "solar") and hasattr(boss, "lunar"):
+            target_hp = boss.solar.hp + boss.lunar.hp
+        self.boss_hp_display += (target_hp - self.boss_hp_display) * 0.18
         if hasattr(boss, "resonance"):
             self.res_display += (boss.resonance - self.res_display) * 0.22
         if hasattr(boss, "orb"):
@@ -73,10 +77,21 @@ class HUD:
         x = (C.SCREEN_W - bar_w) // 2
         y = 14
 
+        # detect boss kind
         is_mirror = hasattr(boss, "orb")
-        # boss name + phase - wrapped in a translucent chip for legibility
+        is_twin = hasattr(boss, "solar") and hasattr(boss, "lunar")
+        is_weaver = hasattr(boss, "threads")
+        is_echo = hasattr(boss, "echo_spawn_request")
+
         phase_tag = "- ENRAGED -" if boss.phase == 2 else ""
-        if is_mirror:
+        if is_twin:
+            name_str = "THE TWIN SOVEREIGNS" if boss.solar.alive and boss.lunar.alive \
+                else (f"{'SOLAR' if boss.solar.alive else 'LUNAR'} KING - LAST")
+        elif is_weaver:
+            name_str = f"THE FATE-WEAVER  {phase_tag}"
+        elif is_echo:
+            name_str = f"THE ECHO LORD  {phase_tag}"
+        elif is_mirror:
             name_str = f"THE MIRRORWRIGHT  {phase_tag}"
         else:
             name_str = f"THE HOLLOW KING  {phase_tag}"
@@ -86,7 +101,14 @@ class HUD:
         )
         y += 26
 
-        # HP bar
+        if is_twin:
+            # two HP bars stacked, brighter for active king
+            self._draw_twin_hp_bars(surf, boss, x, y, bar_w, bar_h)
+            y2 = y + bar_h * 2 + 10
+            self._draw_cycle_indicator(surf, boss, x, y2, bar_w)
+            return
+
+        # single HP bar for other bosses
         max_hp = boss.max_hp if hasattr(boss, "max_hp") else C.BOSS_MAX_HP
         pygame.draw.rect(surf, (20, 12, 18), (x - 2, y - 2, bar_w + 4, bar_h + 4))
         pygame.draw.rect(surf, (44, 24, 32), (x, y, bar_w, bar_h))
@@ -99,8 +121,99 @@ class HUD:
         y2 = y + bar_h + 6
         if is_mirror:
             self._draw_orb_bar(surf, boss, x, y2, bar_w, bar_h)
+        elif is_weaver:
+            self._draw_weaver_threads(surf, boss, x, y2, bar_w, bar_h)
+        elif is_echo:
+            self._draw_echo_info(surf, boss, x, y2, bar_w, bar_h)
         else:
             self._draw_resonance_bar(surf, x, y2, bar_w, bar_h)
+
+    def _draw_twin_hp_bars(self, surf, boss, x, y, bar_w, bar_h):
+        half_w = (bar_w - 12) // 2
+        # solar bar (left)
+        solar_pct = max(0.0, boss.solar.hp / boss.solar.max_hp)
+        lunar_pct = max(0.0, boss.lunar.hp / boss.lunar.max_hp)
+        # backdrops
+        for offset, (pct, col, king) in enumerate([
+            (solar_pct, C.GOLD, boss.solar),
+            (lunar_pct, (140, 170, 230), boss.lunar),
+        ]):
+            bx = x + offset * (half_w + 12)
+            pygame.draw.rect(surf, (20, 12, 18), (bx - 2, y - 2, half_w + 4, bar_h + 4))
+            pygame.draw.rect(surf, (40, 30, 40), (bx, y, half_w, bar_h))
+            fade = 255 if king.active else 120
+            fill_col = (col[0], col[1], col[2])
+            pygame.draw.rect(surf, fill_col, (bx, y, int(half_w * pct), bar_h))
+            if not king.active:
+                # dim ghost overlay
+                ghost = pygame.Surface((half_w, bar_h), pygame.SRCALPHA)
+                ghost.fill((0, 0, 0, 120))
+                surf.blit(ghost, (bx, y))
+            # label chip above each bar
+            label = "SOLAR" if king.role == "solar" else "LUNAR"
+            if king.active:
+                label += " *"
+            self._blit_chip(
+                surf, label, col if king.active else (180, 180, 180),
+                topleft=(bx, y - 16),
+            )
+        # combined HP bar background below (for aggregate view)
+        y2 = y + bar_h + 4
+        # second row: full HP bar split
+        full_pct = max(0.0, (boss.solar.hp + boss.lunar.hp) / (boss.solar.max_hp + boss.lunar.max_hp))
+        pygame.draw.rect(surf, (20, 12, 18), (x - 2, y2 - 2, bar_w + 4, bar_h + 4))
+        pygame.draw.rect(surf, (44, 24, 32), (x, y2, bar_w, bar_h))
+        pygame.draw.rect(surf, C.BLOOD, (x, y2, int(bar_w * full_pct), bar_h))
+
+    def _draw_cycle_indicator(self, surf, boss, x, y, bar_w):
+        # phase label and time-to-flip bar
+        phase_text = "DAY" if boss.day_phase == "day" else "NIGHT"
+        col = C.GOLD if boss.day_phase == "day" else (140, 170, 230)
+        self._blit_chip(surf, phase_text, col, topleft=(x, y))
+        # time to flip bar
+        if boss.solar.alive and boss.lunar.alive:
+            frac = boss.cycle_timer / C.TWIN_CYCLE_FRAMES
+            fw = int(bar_w * frac)
+            bar_y = y + 6
+            pygame.draw.rect(surf, (20, 20, 28), (x + 76, bar_y, bar_w - 80, 6))
+            pygame.draw.rect(surf, col, (x + 76, bar_y, fw, 6))
+            self._blit_chip(
+                surf, f"{int(boss.cycle_timer / 60)}s to flip",
+                (210, 210, 220),
+                topright=(x + bar_w, y),
+            )
+
+    def _draw_weaver_threads(self, surf, boss, x, y, bar_w, bar_h):
+        pygame.draw.rect(surf, (20, 20, 28), (x - 2, y - 2, bar_w + 4, bar_h + 4))
+        pygame.draw.rect(surf, (30, 22, 38), (x, y, bar_w, bar_h))
+        live = boss.live_thread_count
+        dr_pct = min(0.85, live * C.WEAVER_THREAD_DEFENSE)
+        # fill shows current defense %
+        fill_w = int(bar_w * dr_pct / 0.85)
+        pygame.draw.rect(surf, (200, 140, 220), (x, y, fill_w, bar_h))
+        lbl_y = y + bar_h + 2
+        self._blit_chip(surf, "THREADS", (220, 190, 240), topleft=(x, lbl_y))
+        self._blit_chip(
+            surf, f"{live} live  |  {int(dr_pct * 100)}% dmg absorbed",
+            (220, 190, 240),
+            topright=(x + bar_w, lbl_y),
+        )
+
+    def _draw_echo_info(self, surf, boss, x, y, bar_w, bar_h):
+        pygame.draw.rect(surf, (20, 20, 28), (x - 2, y - 2, bar_w + 4, bar_h + 4))
+        pygame.draw.rect(surf, (40, 22, 30), (x, y, bar_w, bar_h))
+        # cadence bar - when next echo spawns
+        interval = C.ECHO_SPAWN_INTERVAL_P2 if boss.phase == 2 else C.ECHO_SPAWN_INTERVAL_P1
+        frac = 1.0 - (boss.spawn_timer / interval)
+        fill_w = int(bar_w * max(0.0, min(1.0, frac)))
+        pygame.draw.rect(surf, (240, 120, 150), (x, y, fill_w, bar_h))
+        lbl_y = y + bar_h + 2
+        self._blit_chip(surf, "NEXT ECHO", (240, 180, 200), topleft=(x, lbl_y))
+        self._blit_chip(
+            surf, f"{boss.spawn_timer // 60 + 1}s",
+            (240, 180, 200),
+            topright=(x + bar_w, lbl_y),
+        )
 
     def _draw_resonance_bar(self, surf, x, y2, bar_w, bar_h):
         pygame.draw.rect(surf, (20, 20, 28), (x - 2, y2 - 2, bar_w + 4, bar_h + 4))

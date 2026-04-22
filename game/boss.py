@@ -10,6 +10,7 @@ import math
 import random
 import pygame
 
+from . import assets
 from . import constants as C
 from . import sprites
 from .projectile import CrownBolt
@@ -45,7 +46,12 @@ class Boss:
         self.enraged_anim = 0
         # transient per-state data for rich visuals
         self._sweep_trail = []    # list of (x, y, tip_x, tip_y, life)
+        self._swing_ghosts = []   # list of (angle_deg, life) for sprite afterimages
         self._anim_tick = 0       # monotonic for orbiting particle phases
+        # ornate bronze sword sprite, pivots around the hilt
+        self._blade_sprite = sprites.make_boss_sword_pivot(
+            assets.TILE_SWORD_BRONZE, scale=5,
+        )
 
     # ---------- sprites ----------
 
@@ -221,6 +227,10 @@ class Boss:
             for (x, y, tx, ty, life) in self._sweep_trail
             if life > 1
         ]
+        # fade out sprite ghosts (sword afterimages)
+        self._swing_ghosts = [
+            (ang, life - 1) for (ang, life) in self._swing_ghosts if life > 1
+        ]
 
         # phase transition
         if self.phase == 1 and self.hp <= self.max_hp * C.BOSS_ENRAGE_HP_PCT:
@@ -255,6 +265,8 @@ class Boss:
             tip_x = hx + math.cos(rad) * 90
             tip_y = hy + math.sin(rad) * 90
             self._sweep_trail.append((hx, hy, tip_x, tip_y, 10))
+            # also record the sprite's current angle for sprite-based afterimages
+            self._swing_ghosts.append((ang, 8))
         elif self.state == "teleport_in":
             pass  # just wait out the reveal frames
 
@@ -452,7 +464,7 @@ class Boss:
 
     def _draw_sweep_telegraph(self, surf, t):
         """Arc outline tracing where the blade will pass + charging spark at the
-        weapon hand. t in [0, 1] through the 34-frame windup.
+        weapon hand, with a runic sigil building under the boss's feet.
         """
         cx = self.x + self.facing * 10
         cy = self.y - 20
@@ -460,13 +472,11 @@ class Boss:
         start_deg, end_deg = -75, 115
         if self.facing == -1:
             start_deg, end_deg = 255, 65
-        # sample points along the arc
         segs = 28
         pts = []
         for i in range(segs + 1):
             a = math.radians(start_deg + (end_deg - start_deg) * i / segs)
             pts.append((cx + math.cos(a) * radius, cy + math.sin(a) * radius))
-        # faint outer guideline (full arc)
         guide_alpha = int(60 + 120 * t)
         for i in range(0, len(pts) - 1, 2):
             p0, p1 = pts[i], pts[i + 1]
@@ -474,45 +484,212 @@ class Boss:
                 surf, (255, 90, 70, guide_alpha),
                 (int(p0[0]), int(p0[1])), (int(p1[0]), int(p1[1])), 2
             )
-        # growing bright leading edge that reveals the strike direction
         reveal = int((segs + 1) * t)
         if reveal >= 2:
             seg_pts = [(int(x), int(y)) for (x, y) in pts[:reveal]]
             pygame.draw.lines(surf, (255, 180, 90), False, seg_pts, 3)
             if len(seg_pts) >= 1:
-                pygame.draw.circle(surf, (255, 240, 180), seg_pts[-1], 4)
-        # pulsing charge orb at the hand
-        orb_r = 4 + int(t * 8) + (self._anim_tick // 4) % 2
-        orb = pygame.Surface((orb_r * 2 + 6, orb_r * 2 + 6), pygame.SRCALPHA)
-        pygame.draw.circle(orb, (255, 140, 70, 200), (orb_r + 3, orb_r + 3), orb_r)
-        pygame.draw.circle(orb, (255, 220, 150, 255), (orb_r + 3, orb_r + 3), max(1, orb_r - 3))
+                pygame.draw.circle(surf, (255, 240, 180), seg_pts[-1], 5)
+                pygame.draw.circle(surf, (255, 255, 255), seg_pts[-1], 2)
+        # charge orb at the hand (pulsing)
+        orb_r = 4 + int(t * 9) + (self._anim_tick // 4) % 2
+        orb = pygame.Surface((orb_r * 2 + 8, orb_r * 2 + 8), pygame.SRCALPHA)
+        pygame.draw.circle(orb, (255, 140, 70, 200), (orb_r + 4, orb_r + 4), orb_r)
+        pygame.draw.circle(orb, (255, 220, 150, 255), (orb_r + 4, orb_r + 4), max(1, orb_r - 3))
+        pygame.draw.circle(orb, (255, 255, 255), (orb_r + 4, orb_r + 4), max(1, orb_r - 7))
         surf.blit(orb, orb.get_rect(center=(int(cx), int(cy))))
+        # runic sigil on the ground under the boss's feet - fades in late
+        if t > 0.35:
+            self._draw_rune_sigil(
+                surf, int(self.x), int(self.y) + 10, (t - 0.3) * 1.4,
+                ring_col=(255, 130, 80), glyph_col=(255, 220, 160),
+            )
+
+    def _draw_rune_sigil(self, surf, cx, cy, t, ring_col, glyph_col):
+        """A runic circle with four glyphs drawn in perspective at the boss's
+        feet. Used at the end of sweep telegraphs for royal-magic flavour.
+        """
+        t = max(0.0, min(1.0, t))
+        rx = int(44 * t + 6)
+        ry = int(rx * 0.40)
+        ring = pygame.Surface((rx * 2 + 8, ry * 2 + 8), pygame.SRCALPHA)
+        alpha = int(100 + 120 * t)
+        pygame.draw.ellipse(ring, (*ring_col, alpha), (2, 2, rx * 2 + 4, ry * 2 + 4), 2)
+        pygame.draw.ellipse(
+            ring, (*ring_col, alpha // 2),
+            (6, 4, rx * 2 - 4, ry * 2),
+            1,
+        )
+        # 4 glyphs at cardinal points
+        for a_deg in (0, 90, 180, 270):
+            a = math.radians(a_deg + self._anim_tick * 1.5)
+            gx = rx + 4 + math.cos(a) * rx
+            gy = ry + 4 + math.sin(a) * ry
+            pygame.draw.line(
+                ring, (*glyph_col, alpha),
+                (int(gx) - 3, int(gy) - 3), (int(gx) + 3, int(gy) + 3), 2,
+            )
+            pygame.draw.line(
+                ring, (*glyph_col, alpha),
+                (int(gx) - 3, int(gy) + 3), (int(gx) + 3, int(gy) - 3), 2,
+            )
+        surf.blit(ring, ring.get_rect(midbottom=(cx, cy)))
 
     def _draw_sweep_active(self, surf):
-        """Glowing blade swept through an arc, with afterimage trail."""
+        """Ornate swing: whoosh crescent behind + actual sword sprite rotated
+        through the arc + sprite ghost afterimages + tip sparkle."""
         t = 1.0 - self.state_timer / 22.0
         cx = self.x + self.facing * 10
         cy = self.y - 20
-        # afterimage ghosts
-        for (hx, hy, tx, ty, life) in self._sweep_trail:
-            alpha = int(200 * (life / 10.0))
-            col = (255, 180, 90, alpha)
-            trail = pygame.Surface(
-                (surf.get_width(), surf.get_height()), pygame.SRCALPHA
+        self._draw_swing_crescent(
+            surf, cx, cy, t,
+            inner_r=32, outer_r=100,
+            body_col=(255, 150, 70, 90),
+            core_col=(255, 240, 190, 120),
+            edge_col=(255, 100, 50, 150),
+        )
+        # sprite ghosts (past blade positions, alpha-faded via BLEND_RGBA_MULT)
+        for (ghost_ang, life) in self._swing_ghosts[-5:]:
+            self._blit_rotated_blade(
+                surf, cx, cy, ghost_ang, alpha=int(180 * (life / 8.0))
             )
-            pygame.draw.line(trail, col, (int(hx), int(hy)), (int(tx), int(ty)), 3)
-            surf.blit(trail, (0, 0))
-        # current blade
+        # current blade - full opacity
         ang = self.sweep_blade_angle(t)
+        self._blit_rotated_blade(surf, cx, cy, ang)
+        # tip sparkle for impact feel
         rad = math.radians(ang)
-        tip_x = cx + math.cos(rad) * 96
-        tip_y = cy + math.sin(rad) * 96
-        # blade body (thick white-hot core + warmer outer stroke)
-        pygame.draw.line(surf, (180, 60, 40), (int(cx), int(cy)), (int(tip_x), int(tip_y)), 7)
-        pygame.draw.line(surf, (255, 180, 90), (int(cx), int(cy)), (int(tip_x), int(tip_y)), 4)
-        pygame.draw.line(surf, (255, 250, 220), (int(cx), int(cy)), (int(tip_x), int(tip_y)), 2)
-        # bright tip
+        tip_x = cx + math.cos(rad) * 90
+        tip_y = cy + math.sin(rad) * 90
         pygame.draw.circle(surf, (255, 240, 200), (int(tip_x), int(tip_y)), 5)
+        pygame.draw.circle(surf, (255, 255, 255), (int(tip_x), int(tip_y)), 2)
+
+    def _blit_rotated_blade(self, surf, pivot_x, pivot_y, swing_deg, alpha=255):
+        """Render the sword sprite rotated to swing_deg with hilt at the pivot.
+        swing_deg uses our convention: 0 = right, -90 = up, 90 = down.
+        """
+        if self._blade_sprite is None:
+            return
+        # pygame.transform.rotate takes CCW positive; our convention is CW positive.
+        # Source sprite's blade points up (our -90). Net rotation to display at
+        # `swing_deg`: pygame_rot = -(swing_deg + 90)
+        pygame_rot = -(swing_deg + 90)
+        rotated = pygame.transform.rotate(self._blade_sprite, pygame_rot)
+        if alpha < 255:
+            fade = pygame.Surface(rotated.get_size(), pygame.SRCALPHA)
+            fade.fill((255, 255, 255, max(0, min(255, alpha))))
+            rotated = rotated.copy()
+            rotated.blit(fade, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+        surf.blit(rotated, rotated.get_rect(center=(int(pivot_x), int(pivot_y))))
+
+    def _draw_swing_crescent(self, surf, cx, cy, t, inner_r, outer_r,
+                             body_col, core_col, edge_col):
+        """Filled crescent showing the arc already covered by the blade."""
+        if t < 0.05:
+            return
+        n = 22
+        inner_pts = []
+        outer_pts = []
+        for i in range(n):
+            sub_t = t * (i / (n - 1))
+            ang = math.radians(self.sweep_blade_angle(sub_t))
+            inner_pts.append((cx + math.cos(ang) * inner_r, cy + math.sin(ang) * inner_r))
+            outer_pts.append((cx + math.cos(ang) * outer_r, cy + math.sin(ang) * outer_r))
+        whoosh = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+        # body fill
+        poly = inner_pts + list(reversed(outer_pts))
+        pygame.draw.polygon(whoosh, body_col, [(int(x), int(y)) for x, y in poly])
+        # inner bright band
+        mid_in_r = inner_r + (outer_r - inner_r) * 0.35
+        mid_out_r = inner_r + (outer_r - inner_r) * 0.75
+        band_in = []
+        band_out = []
+        for i in range(n):
+            sub_t = t * (i / (n - 1))
+            ang = math.radians(self.sweep_blade_angle(sub_t))
+            band_in.append((cx + math.cos(ang) * mid_in_r, cy + math.sin(ang) * mid_in_r))
+            band_out.append((cx + math.cos(ang) * mid_out_r, cy + math.sin(ang) * mid_out_r))
+        pygame.draw.polygon(
+            whoosh, core_col,
+            [(int(x), int(y)) for x, y in band_in + list(reversed(band_out))],
+        )
+        # leading edge: bright ribbon along the newest arc slice
+        lead_n = max(2, n // 3)
+        lead_out = outer_pts[-lead_n:]
+        lead_in = inner_pts[-lead_n:]
+        pygame.draw.polygon(
+            whoosh, edge_col,
+            [(int(x), int(y)) for x, y in lead_in + list(reversed(lead_out))],
+        )
+        # outer arc outline for definition
+        pygame.draw.lines(
+            whoosh, (*edge_col[:3], 220), False,
+            [(int(x), int(y)) for x, y in outer_pts], 2,
+        )
+        surf.blit(whoosh, (0, 0))
+
+    def _draw_curved_blade(self, surf, cx, cy, rad, length, curve_amount,
+                           outer_col, body_col, core_col):
+        """A scimitar-style curved blade polygon (hilt -> tip with bulge)."""
+        # perpendicular (for curve direction)
+        pcos = math.cos(rad + math.pi / 2)
+        psin = math.sin(rad + math.pi / 2)
+        hilt = (cx, cy)
+        tip = (cx + math.cos(rad) * length, cy + math.sin(rad) * length)
+        # curve the blade slightly forward (in direction of swing)
+        m1 = (cx + math.cos(rad) * (length * 0.35), cy + math.sin(rad) * (length * 0.35))
+        m2 = (cx + math.cos(rad) * (length * 0.70), cy + math.sin(rad) * (length * 0.70))
+        outer = [
+            hilt,
+            (m1[0] + pcos * curve_amount, m1[1] + psin * curve_amount),
+            (m2[0] + pcos * (curve_amount * 0.9), m2[1] + psin * (curve_amount * 0.9)),
+            tip,
+            (m2[0] - pcos * (curve_amount * 0.5), m2[1] - psin * (curve_amount * 0.5)),
+            (m1[0] - pcos * (curve_amount * 0.6), m1[1] - psin * (curve_amount * 0.6)),
+        ]
+        pygame.draw.polygon(surf, outer_col, [(int(x), int(y)) for x, y in outer])
+        # inner body
+        inner = [
+            hilt,
+            (m1[0] + pcos * (curve_amount * 0.65), m1[1] + psin * (curve_amount * 0.65)),
+            (m2[0] + pcos * (curve_amount * 0.55), m2[1] + psin * (curve_amount * 0.55)),
+            tip,
+            (m2[0] - pcos * (curve_amount * 0.25), m2[1] - psin * (curve_amount * 0.25)),
+            (m1[0] - pcos * (curve_amount * 0.3), m1[1] - psin * (curve_amount * 0.3)),
+        ]
+        pygame.draw.polygon(surf, body_col, [(int(x), int(y)) for x, y in inner])
+        # bright centre line
+        pygame.draw.line(surf, core_col, (int(cx), int(cy)), (int(tip[0]), int(tip[1])), 2)
+        # tip sparkle (double halo)
+        pygame.draw.circle(surf, core_col, (int(tip[0]), int(tip[1])), 6)
+        pygame.draw.circle(surf, (255, 255, 255), (int(tip[0]), int(tip[1])), 3)
+        # 4-point star at the tip (subtle)
+        for da in (0, math.pi / 2):
+            ang = rad + da
+            sx = tip[0] + math.cos(ang) * 10
+            sy = tip[1] + math.sin(ang) * 10
+            pygame.draw.line(
+                surf, (255, 240, 200, 180),
+                (int(tip[0]), int(tip[1])), (int(sx), int(sy)), 1,
+            )
+            sx = tip[0] - math.cos(ang) * 10
+            sy = tip[1] - math.sin(ang) * 10
+            pygame.draw.line(
+                surf, (255, 240, 200, 180),
+                (int(tip[0]), int(tip[1])), (int(sx), int(sy)), 1,
+            )
+
+    def _draw_hilt(self, surf, cx, cy, rad, gold_col, dark_col):
+        """A small decorative cross-guard at the blade pivot."""
+        pcos = math.cos(rad + math.pi / 2)
+        psin = math.sin(rad + math.pi / 2)
+        # guard (perpendicular bar)
+        g0 = (cx + pcos * 7, cy + psin * 7)
+        g1 = (cx - pcos * 7, cy - psin * 7)
+        pygame.draw.line(surf, dark_col, (int(g0[0]), int(g0[1])), (int(g1[0]), int(g1[1])), 4)
+        pygame.draw.line(surf, gold_col, (int(g0[0]), int(g0[1])), (int(g1[0]), int(g1[1])), 2)
+        # pommel jewel
+        pygame.draw.circle(surf, gold_col, (int(cx), int(cy)), 4)
+        pygame.draw.circle(surf, (255, 250, 220), (int(cx), int(cy)), 2)
 
     def _draw_bolt_telegraph(self, surf, t):
         """Orbiting particles converging on the crown + central charge orb."""

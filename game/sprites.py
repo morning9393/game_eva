@@ -5,6 +5,7 @@ procedurally drawn pixel art if the pack is missing. This keeps the game
 runnable without any external downloads while giving a richer look when
 the assets are present.
 """
+import math
 import pygame
 
 from . import assets
@@ -143,6 +144,26 @@ def make_sword_pivot():
     canvas = pygame.Surface((size, size), pygame.SRCALPHA)
     # sword blade points up in source. Place so the hilt (bottom of sprite) sits
     # at the canvas center.
+    cx = size // 2 - bw // 2
+    cy = size // 2 - bh
+    canvas.blit(base, (cx, cy))
+    return canvas
+
+
+def make_boss_sword_pivot(tile_rc, scale=5, tint=None):
+    """Boss-sized sword pivot canvas for rotation around the hilt.
+    Larger than the player sword so the swing reads as heavier and more ornate.
+    """
+    base = assets.get(*tile_rc, scale=scale, tint=tint)
+    if base is None:
+        # fallback: a chunky rectangle
+        bw, bh = 16 * scale, 16 * scale
+        base = pygame.Surface((bw, bh), pygame.SRCALPHA)
+        pygame.draw.rect(base, (180, 180, 200), (bw // 2 - 3, 4, 6, bh - 10))
+        pygame.draw.rect(base, (140, 100, 60), (bw // 2 - 5, bh - 10, 10, 4))
+    bw, bh = base.get_size()
+    size = int(max(bw, bh) * 2.2)
+    canvas = pygame.Surface((size, size), pygame.SRCALPHA)
     cx = size // 2 - bw // 2
     cy = size // 2 - bh
     canvas.blit(base, (cx, cy))
@@ -333,13 +354,123 @@ def make_mirrorwright_sprite(phase=1, flash=0):
     return out
 
 
+def make_solar_king_sprite(active=True):
+    """Level 3 - Solar King, gold-tinted with sun crown."""
+    tint = (255, 215, 120, 255) if active else (180, 170, 130, 255)
+    base = assets.get(*assets.TILE_SOLAR_KING, scale=SCALE * 2, tint=tint)
+    if base is None:
+        base = _fallback_boss(1)
+    out = base.copy()
+    w, h = out.get_size()
+    # sun-ray crown
+    cx = w // 2
+    for i in range(8):
+        a = math.radians(i * 360 / 8)
+        px = int(cx + math.cos(a) * (w * 0.28))
+        py = int(h * 0.08 + math.sin(a) * (w * 0.18))
+        pygame.draw.circle(out, (255, 200, 80), (px, py), 3)
+    pygame.draw.circle(out, C.GOLD, (cx, int(h * 0.08)), 6)
+    pygame.draw.circle(out, (255, 245, 200), (cx, int(h * 0.08)), 3)
+    if not active:
+        ghost = pygame.Surface(out.get_size(), pygame.SRCALPHA)
+        ghost.fill((255, 255, 255, 100))
+        out.blit(ghost, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    return out
+
+
+def make_lunar_king_sprite(active=True):
+    """Level 3 - Lunar King, indigo-tinted with crescent crown."""
+    tint = (150, 170, 230, 255) if active else (110, 120, 160, 255)
+    base = assets.get(*assets.TILE_LUNAR_KING, scale=SCALE * 2, tint=tint)
+    if base is None:
+        base = _fallback_boss(1)
+    out = base.copy()
+    w, h = out.get_size()
+    cx = w // 2
+    # crescent moon above head
+    pygame.draw.circle(out, (210, 225, 245), (cx, int(h * 0.08)), 7)
+    pygame.draw.circle(out, (50, 60, 120), (cx + 3, int(h * 0.08)), 6)
+    if not active:
+        ghost = pygame.Surface(out.get_size(), pygame.SRCALPHA)
+        ghost.fill((255, 255, 255, 100))
+        out.blit(ghost, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    return out
+
+
+def make_fate_weaver_sprite(phase=1):
+    """Level 4 - Fate-Weaver, pale-tinted with violet threads."""
+    tint = (210, 185, 225, 255) if phase == 1 else (220, 160, 190, 255)
+    base = assets.get(*assets.TILE_FATE_WEAVER, scale=SCALE * 2, tint=tint)
+    if base is None:
+        base = _fallback_boss(phase)
+    out = base.copy()
+    w, h = out.get_size()
+    # ornate woven diadem
+    for i in range(5):
+        x = int(w * (0.30 + i * 0.1))
+        pygame.draw.rect(out, (180, 100, 180), (x, int(h * 0.06), 2, 4))
+    # spindle at waist
+    pygame.draw.circle(out, (160, 120, 200), (w // 2, int(h * 0.55)), 4)
+    pygame.draw.circle(out, (230, 200, 255), (w // 2, int(h * 0.55)), 2)
+    return out
+
+
+def make_echo_lord_sprite(phase=1):
+    """Level 5 - Echo Lord, wine-red tinted with glitching crown."""
+    tint = (230, 150, 180, 255) if phase == 1 else (240, 120, 120, 255)
+    base = assets.get(*assets.TILE_ECHO_LORD, scale=SCALE * 2, tint=tint)
+    if base is None:
+        base = _fallback_boss(phase)
+    out = base.copy()
+    w, h = out.get_size()
+    cx = w // 2
+    # "glitch" offset duplicate crown (echo theme)
+    pygame.draw.rect(out, (220, 80, 120), (cx - 8, int(h * 0.02), 16, 3))
+    pygame.draw.rect(out, (160, 220, 255), (cx - 6, int(h * 0.04), 12, 2))
+    pygame.draw.circle(out, (255, 120, 160), (cx, int(h * 0.1)), 4)
+    return out
+
+
+def make_echo_snapshot_sprite():
+    """A red-tinted silhouette of the player for Echo Lord's echoes."""
+    base = assets.get(*assets.TILE_PLAYER, scale=SCALE, tint=(220, 120, 140, 255))
+    if base is None:
+        base = _fallback_player(1)
+    out = base.copy()
+    fade = pygame.Surface(out.get_size(), pygame.SRCALPHA)
+    fade.fill((255, 255, 255, 180))
+    out.blit(fade, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+    return out
+
+
+def make_anchor_sprite():
+    """Level 4 - a stone anchor pillar for weaving threads to."""
+    s = pygame.Surface((12, 18), pygame.SRCALPHA)
+    # wide base
+    pygame.draw.rect(s, (80, 70, 96), (0, 14, 12, 4))
+    pygame.draw.rect(s, (50, 42, 62), (0, 17, 12, 1))
+    # shaft
+    pygame.draw.rect(s, (108, 98, 124), (3, 3, 6, 12))
+    pygame.draw.rect(s, (80, 70, 96), (3, 3, 1, 12))
+    pygame.draw.rect(s, (140, 128, 156), (8, 3, 1, 12))
+    # crystal top
+    pygame.draw.polygon(s, (200, 160, 230), [(6, 0), (10, 4), (6, 6), (2, 4)])
+    pygame.draw.polygon(s, (255, 220, 255), [(6, 1), (7, 3), (6, 5), (5, 3)])
+    return pygame.transform.scale(s, (s.get_width() * SCALE, s.get_height() * SCALE))
+
+
 def make_phantom_sprite():
     """Ghostly silver-blue silhouette of the player, used for phantom reflections."""
     base = assets.get(*assets.TILE_PLAYER, scale=SCALE, tint=(140, 180, 230, 255))
     if base is None:
         base = _fallback_player(1)
     out = base.copy()
-    out.set_alpha(170)
+    # Uniform alpha scale that preserves per-pixel alpha (no black bounding
+    # rectangle around the ghost). BLEND_RGBA_MULT multiplies all channels -
+    # including alpha - against this 170-alpha white surface.
+    fade = pygame.Surface(out.get_size(), pygame.SRCALPHA)
+    fade.fill((255, 255, 255, 170))
+    out.blit(fade, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
     return out
 
 
