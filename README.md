@@ -92,10 +92,15 @@ Requires conda (Anaconda / Miniconda). A dedicated env keeps pygame isolated.
 ```bash
 conda create -n game_eva python=3.11 -y
 conda activate game_eva
-pip install pygame
+pip install pygame numpy
 ```
 
-Tested with **Python 3.11.13** and **pygame 2.6.1** (SDL 2.28.4) on macOS.
+`numpy` is used to synthesize the in-game audio at startup (no audio files
+ship with the repo). If `numpy` or the system mixer is unavailable the game
+runs silently — no crashes.
+
+Tested with **Python 3.11.13**, **pygame 2.6.1** (SDL 2.28.4), and
+**numpy 2.4.4** on macOS.
 
 ## Run
 
@@ -159,11 +164,12 @@ game_eva/
     ├── fate_weaver.py     # Fate-Weaver (threads, pull, fated strike, weft pulse)
     ├── echo_lord.py       # Echo Lord (snapshots, cascade, memory surge)
     ├── player.py          # movement, sword swing arc, dash, path history
-    ├── shard.py           # Crown Shard entities + pulse AoE (level 5)
-    ├── projectile.py      # crown bolts (level 5)
+    ├── shard.py           # Crown Shard entities + pulse AoE (Hollow King)
+    ├── projectile.py      # crown bolts (Hollow King)
     ├── particles.py       # hit sparks, rings, dust
     ├── sprites.py         # sprite factories (Kenney-backed with fallback)
     ├── assets.py          # tilemap loader + named tile constants
+    ├── sounds.py          # procedural audio: 5 BGMs + 38 SFX
     ├── ui.py              # HUD, chip-styled labels, toast panels
     ├── utils.py           # math / arena helpers
     └── constants.py       # all tuning knobs
@@ -177,6 +183,48 @@ Pixel-art sprites come from Kenney's **Tiny Dungeon** pack (CC0 public domain) a
 - **Collision.** The player is pushed out of pillar, brazier, and throne bases with minimum-translation sliding. Ground debris is walk-through and always renders *below* the player.
 - **Boss attack visuals.** No plain expanding ellipses: each attack has its own crescent, arc, runic sigil, or rift. Boss sweeps now render using actual pixel-art sword sprites (Bronze-ornate blade for the Hollow King, silver scimitar for the Mirrorwright) rotated through the arc with sprite ghost afterimages. Teleports are vertical rifts with sprite squash and themed particle bursts.
 - **HUD.** Every label (DASH, boss name, Resonance/Orb/Thread/Echo values, toasts, phase banner, win/lose, test code) sits on translucent dark chips so text never blends with the arena.
+
+## Audio
+
+Every BGM and SFX is **synthesised procedurally with numpy at startup** —
+no audio files ship with the game. Five distinct BGM tracks (one per boss)
+plus 38 sound effects are built once when `pygame.mixer` initialises and
+are then cached for instant playback.
+
+**BGM, one per trial.** Each track is a stereo composition with layered
+drone, arpeggio, sustained lead, soft percussion, atmospheric noise bed,
+and a 200 ms crossfade at the loop boundary so it tiles seamlessly.
+
+| Trial | Track | Key | Duration |
+|-------|-------|-----|----------|
+| 1 Echo Lord | Atmospheric, haunting | D minor | 48 s |
+| 2 Twin Sovereigns | Bright cosmic, alternating major/minor bars | G major / G minor | 40 s |
+| 3 Fate-Weaver | Tense mystical, harp-like 12-note arpeggio | A minor | 44 s |
+| 4 Mirrorwright | Glassy ethereal, 16-note glittering arpeggio | F# minor | 44 s |
+| 5 Hollow King | Dark royal, slow brass-pad with heavy drum | C minor | 44 s |
+
+**SFX bank.** 6 shared (sword swing, dash, boss/player hit, boss/player
+death) + 5 Echo Lord + 7 Twin Sovereigns + 6 Fate-Weaver + 8 Mirrorwright +
+6 Hollow King = 38 total. Each is built from sine / triangle / saw / noise
+primitives passed through ADSR + decay envelopes, with optional lowpass
+filtering and feedback-delay reverb. Examples:
+
+- `royal_sweep` — filtered noise + low rumble for the Hollow King's heavy
+  swing
+- `cycle_flip` — bell-like swept chime when day/night flips in Twin
+  Sovereigns
+- `thread_weave` — plucked harp string when the Fate-Weaver spins a new
+  thread
+- `dash_shatter` — huge crack + 4-bell cluster + sub-bass when the
+  Mirrorwright's orb is dash-shattered
+- `memory_surge` — rumble + ascending detuned chord + crash for the Echo
+  Lord's mass-fire telegraph
+
+The BGM auto-switches when you select a different trial; SFX fire on
+every meaningful event (boss state transitions, attack queueing, telegraph
+→active phase, hits landed, hits taken). If `numpy` isn't installed or the
+mixer can't initialise (CI / headless), the audio system safely
+no-ops — the game still renders and plays correctly.
 
 ## Credits
 

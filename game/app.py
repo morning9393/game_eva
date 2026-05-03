@@ -15,6 +15,7 @@ from .particles import ParticleSystem
 from .player import Player
 from .projectile import CrownBolt
 from .shard import Shard
+from .sounds import SoundSystem
 from .twin_sovereigns import LunarOrbit, SolarFlare, StarFall, Sunlance, TwinSovereigns
 from .ui import HUD
 from .utils import circle_rect_collide, clamp, clamp_to_arena, inside_arena, random_point_in_arena
@@ -93,6 +94,7 @@ class Decor:
 class Game:
     def __init__(self):
         pygame.init()
+        SoundSystem.init()
         pygame.display.set_caption(C.TITLE)
         self.screen = pygame.display.set_mode((C.SCREEN_W, C.SCREEN_H))
         self.clock = pygame.time.Clock()
@@ -154,6 +156,10 @@ class Game:
         self.result_timer = 0
         self._showed_danger_hint = False
         self._showed_shatter_hint = False
+        self._prev_boss_state = None     # for SFX state-entry detection
+        self._prev_secondary_timer = 0   # for FateWeaver / EchoLord telegraphs
+        self._prev_day_phase = None      # for TwinSovereigns cycle flip SFX
+        self._prev_thread_count = 0      # for FateWeaver thread-snap SFX
         self._build_arena_decor()
 
     def _build_arena_decor(self):
@@ -287,6 +293,7 @@ class Game:
                 if self.state in ("fight", "win", "lose"):
                     # back to title
                     self.state = "title"
+                    SoundSystem.stop_music()
                     return
                 pygame.quit()
                 sys.exit(0)
@@ -306,15 +313,19 @@ class Game:
                     self.level_id = LEVELS[self.title_selection]["id"]
                     self._init_fight()
                     self.state = "fight"
+                    self._on_enter_fight()
             elif self.state in ("win", "lose") and ev.key in (pygame.K_RETURN, pygame.K_SPACE, pygame.K_r):
                 self._init_fight()
                 self.state = "fight"
+                self._on_enter_fight()
             elif self.state == "fight":
                 if ev.key in (pygame.K_j, pygame.K_SPACE):
-                    self.player.try_attack()
+                    if self.player.try_attack():
+                        SoundSystem.play("sword_swing")
                 elif ev.key in (pygame.K_k, pygame.K_LSHIFT, pygame.K_RSHIFT):
                     keys = pygame.key.get_pressed()
-                    self.player.try_dash(keys)
+                    if self.player.try_dash(keys):
+                        SoundSystem.play("dash")
 
     # ---------- update ----------
 
@@ -392,15 +403,42 @@ class Game:
         """Helper - tick modulo for staggered particle emissions."""
         return pygame.time.get_ticks() % n == 0
 
+    def _music_key_for_level(self):
+        return {
+            1: "hollow_king",
+            2: "mirrorwright",
+            3: "twin_sovereigns",
+            4: "fate_weaver",
+            5: "echo_lord",
+        }.get(self.level_id, "echo_lord")
+
+    def _sfx_enabled(self):
+        """All levels now have SFX (kept for legacy hooks)."""
+        return True
+
+    def _on_enter_fight(self):
+        """Called when transitioning title -> fight or restarting."""
+        SoundSystem.play_music(self._music_key_for_level())
+
     # ---------- per-level update logic ----------
 
     def _update_level1_specifics(self):
         """Hollow King: shards, resonance, bolts."""
+        # state-entry SFX hooks
+        if self._prev_boss_state != self.boss.state:
+            if self.boss.state == "sweep":
+                SoundSystem.play("royal_sweep")
+            elif self.boss.state == "ring_slam":
+                SoundSystem.play("ring_slam")
+            elif self.boss.state == "teleport_out":
+                SoundSystem.play("void_step")
+            self._prev_boss_state = self.boss.state
         # boss requests
         if self.boss.spawn_shard_request > 0:
             for _ in range(self.boss.spawn_shard_request):
                 self._spawn_shard(origin=(self.boss.x, self.boss.y))
             self.boss.spawn_shard_request = 0
+            SoundSystem.play("shard_erupt")
         if self.boss.bolts_to_fire:
             for dx, dy in self.boss.bolts_to_fire:
                 ox = self.boss.x + self.boss.facing * 28
@@ -411,6 +449,7 @@ class Game:
                 self.boss.x + self.boss.facing * 28, self.boss.y - 20,
                 C.EMBER, count=14, speed=3.5
             )
+            SoundSystem.play("crown_bolt_fire")
         # timed shard spawns
         interval = C.SHARD_SPAWN_INTERVAL_P2 if self.boss.phase == 2 else C.SHARD_SPAWN_INTERVAL_P1
         self.shard_spawn_timer -= 1
@@ -423,9 +462,11 @@ class Game:
             if evt == "pulse":
                 self.particles.spawn_ring(s.x, s.y, C.EMBER, count=28, speed=4.5, size=3, life=24)
                 self.shake = max(self.shake, 6)
+                SoundSystem.play("shard_pulse", volume_mod=0.7)
                 if math.hypot(self.player.x - s.x, self.player.y - s.y) <= C.SHARD_PULSE_RADIUS:
                     if self.player.take_hit(1):
                         self.hud.toast("Shard pulse!", C.EMBER, 45)
+                        SoundSystem.play("player_hit")
         self.shards = [s for s in self.shards if s.alive]
         # player sword -> boss/shards
         arect = self.player.attack_rect()
@@ -439,6 +480,7 @@ class Game:
                     self.particles.spawn_burst(self.boss.x, self.boss.y - 20, C.BLOOD, count=18, speed=4.0)
                     if self.player.take_hit(result["reflected"]):
                         self.shake = max(self.shake, 10)
+                        SoundSystem.play("player_hit")
                     if not self._showed_danger_hint:
                         self.hud.toast("Break shards to drain Resonance.", C.GOLD, 110)
                         self._showed_danger_hint = True
@@ -448,6 +490,7 @@ class Game:
                     self.shake = max(self.shake, 4 if result["band"] == "safe" else 2)
                     if result["band"] == "warn" and self.hits_landed % 3 == 0:
                         self.hud.toast("Resonance rising...", C.GOLD, 55)
+                    SoundSystem.play("boss_hit")
             for s in self.shards:
                 if id(s) in self.player.attack_hit_set:
                     continue
@@ -460,9 +503,17 @@ class Game:
                         self.particles.spawn_ring(s.x, s.y, C.GOLD, count=20, speed=3.2)
                         self.shake = max(self.shake, 5)
                         self.hud.toast("Shard shattered - Resonance drained", C.GOLD, 50)
+                        SoundSystem.play("thread_snap")  # crisp shatter
 
     def _update_level2_specifics(self):
         """Mirrorwright: mirror orb, dash-shatter, phantoms, silver rain, shard volley."""
+        # boss-state SFX hooks
+        if self._prev_boss_state != self.boss.state:
+            if self.boss.state == "sweep":
+                SoundSystem.play("mirror_sweep")
+            elif self.boss.state == "teleport_out":
+                SoundSystem.play("teleport")
+            self._prev_boss_state = self.boss.state
         # boss phantom request -> spawn phantom that retraces player's path
         if self.boss.phantom_request:
             self.boss.phantom_request = False
@@ -472,6 +523,7 @@ class Game:
                 (200, 220, 240), count=16, speed=3.2, size=3, life=22
             )
             self.shake = max(self.shake, 4)
+            SoundSystem.play("phantom_spawn")
         # Silver Rain: spawn zones at queued positions
         if self.boss.silver_rain_request is not None:
             for (zx, zy) in self.boss.silver_rain_request:
@@ -481,6 +533,7 @@ class Game:
                     count=8, speed=2.0, size=3, life=18,
                 )
             self.boss.silver_rain_request = None
+            SoundSystem.play("silver_rain_warn")
         # Shard Volley: fire shards from boss hand position
         if self.boss.volley_request is not None:
             ox = self.boss.x + self.boss.facing * 20
@@ -493,9 +546,13 @@ class Game:
                 count=14, speed=3.4, size=3, life=22,
             )
             self.shake = max(self.shake, 4)
+            SoundSystem.play("shard_volley")
         # update silver rain zones
         for z in self.silver_zones:
+            prev_phase = z.phase
             z.update()
+            if prev_phase == "telegraph" and z.phase == "active":
+                SoundSystem.play("silver_rain_hit", volume_mod=0.6)
             if z.phase == "active" and not z.has_hit and z.hits_player(self.player):
                 if self.player.take_hit(1):
                     z.has_hit = True
@@ -504,6 +561,7 @@ class Game:
                         self.player.x, self.player.y, (230, 245, 255),
                         count=14, speed=3.0,
                     )
+                    SoundSystem.play("player_hit")
         self.silver_zones = [z for z in self.silver_zones if z.alive]
         # update mirror shards
         for s in self.mirror_shards:
@@ -516,6 +574,7 @@ class Game:
                     self.particles.spawn_burst(
                         s.x, s.y, (230, 245, 255), count=12, speed=2.8,
                     )
+                    SoundSystem.play("player_hit")
         self.mirror_shards = [s for s in self.mirror_shards if s.alive]
         # advance phantoms
         for p in self.phantoms:
@@ -539,6 +598,7 @@ class Game:
                     count=10, speed=2.4, size=3, life=16
                 )
                 self.shake = max(self.shake, 2)
+                SoundSystem.play("boss_hit", volume_mod=0.7)
                 if not self._showed_shatter_hint and self.boss.orb >= self.boss.shatter_threshold * 0.5:
                     self.hud.toast("Dash through the orb to unload the queue.", C.AZURE, 110)
                     self._showed_shatter_hint = True
@@ -552,25 +612,36 @@ class Game:
                     count=40, speed=5.0, size=4, life=30
                 )
                 self.shake = max(self.shake, 14)
+                SoundSystem.play("dash_shatter")
         # auto-shatter if orb at threshold
         if self.boss.orb >= self.boss.shatter_threshold:
             dmg = self.boss.trigger_auto_shatter()
-            if self.player.take_hit(dmg):
+            took = self.player.take_hit(dmg)
+            if took:
                 self.shake = max(self.shake, 12)
                 self.hud.toast("Orb burst!", C.BLOOD, 60)
             self.particles.spawn_ring(
                 self.boss.x, self.boss.y - 20, (220, 140, 160),
                 count=30, speed=4.5, size=4, life=26
             )
+            SoundSystem.play("auto_shatter")
+            if took:
+                SoundSystem.play("player_hit")
 
     def _update_level3_specifics(self):
         """Twin Sovereigns: cycle + sunlance + lunar orbit + solar flare + star fall."""
+        # cycle flip SFX
+        if self._prev_day_phase != self.boss.day_phase:
+            if self._prev_day_phase is not None:
+                SoundSystem.play("cycle_flip")
+            self._prev_day_phase = self.boss.day_phase
         # boss-queued attacks
         if self.boss.sunlance_request is not None:
             sx, sy, dx, dy = self.boss.sunlance_request
             self.sunlances.append(Sunlance(sx, sy, dx, dy))
             self.boss.sunlance_request = None
             self.particles.spawn_burst(sx, sy, (255, 220, 120), count=14, speed=3.2)
+            SoundSystem.play("sunlance_charge")
         if self.boss.lunar_orbit_request:
             self.lunar_orbits.append(LunarOrbit(self.player.x, self.player.y))
             self.boss.lunar_orbit_request = False
@@ -578,6 +649,7 @@ class Game:
                 self.player.x, self.player.y, (180, 200, 240),
                 count=16, speed=2.4, size=3, life=22,
             )
+            SoundSystem.play("lunar_orbit")
         if self.boss.solar_flare_request is not None:
             fx, fy = self.boss.solar_flare_request
             self.solar_flares.append(SolarFlare(fx, fy))
@@ -586,6 +658,7 @@ class Game:
                 fx, fy, (255, 200, 110),
                 count=16, speed=2.6, size=3, life=24,
             )
+            SoundSystem.play("solar_flare")
         if self.boss.star_fall_request is not None:
             for (tx, ty) in self.boss.star_fall_request:
                 self.star_falls.append(StarFall(tx, ty))
@@ -594,9 +667,13 @@ class Game:
                     count=8, speed=2.0, size=3, life=18,
                 )
             self.boss.star_fall_request = None
+            SoundSystem.play("star_fall_warn")
         # advance sunlances and lunar orbits
         for s in self.sunlances:
+            prev_phase = s.phase
             s.update()
+            if prev_phase == "telegraph" and s.phase == "active":
+                SoundSystem.play("sunlance_fire")
             if s.alive and not s.has_hit and s.hits_rect(self.player.rect):
                 if self.player.take_hit(1):
                     s.has_hit = True
@@ -605,6 +682,7 @@ class Game:
                         self.player.x, self.player.y, C.BLOOD,
                         count=14, speed=3.0,
                     )
+                    SoundSystem.play("player_hit")
         self.sunlances = [s for s in self.sunlances if s.alive]
         for o in self.lunar_orbits:
             o.update(self.player)
@@ -615,6 +693,7 @@ class Game:
                     self.particles.spawn_burst(
                         o.x, o.y, (180, 200, 240), count=18, speed=3.2,
                     )
+                    SoundSystem.play("player_hit")
         self.lunar_orbits = [o for o in self.lunar_orbits if o.alive]
         # advance solar flares
         for f in self.solar_flares:
@@ -627,10 +706,14 @@ class Game:
                         self.player.x, self.player.y, (255, 180, 80),
                         count=14, speed=3.0,
                     )
+                    SoundSystem.play("player_hit")
         self.solar_flares = [f for f in self.solar_flares if f.alive]
         # advance star falls
         for sf in self.star_falls:
+            prev_phase = sf.phase
             sf.update()
+            if prev_phase == "warning" and sf.phase == "detonate":
+                SoundSystem.play("star_fall_impact", volume_mod=0.6)
             if sf.alive and not sf.has_hit and sf.hits_player(self.player):
                 if self.player.take_hit(1):
                     sf.has_hit = True
@@ -639,6 +722,7 @@ class Game:
                         self.player.x, self.player.y, (130, 150, 220),
                         count=14, speed=3.0,
                     )
+                    SoundSystem.play("player_hit")
         self.star_falls = [sf for sf in self.star_falls if sf.alive]
         # player sword -> ONLY the active king takes damage
         arect = self.player.attack_rect()
@@ -666,9 +750,23 @@ class Game:
                             count=14, speed=3.0,
                         )
                         self.shake = max(self.shake, 3)
+                        SoundSystem.play("boss_hit")
 
     def _update_level4_specifics(self):
         """Fate-Weaver: threads, thread defense, pull, fated strike, weft pulse."""
+        # boss-state SFX hooks
+        if self._prev_boss_state != self.boss.state:
+            self._prev_boss_state = self.boss.state
+        # pull-dash SFX on transition into pull-active phase
+        if self.boss.pull_active and not getattr(self, "_pull_was_active", False):
+            SoundSystem.play("pull_dash")
+        self._pull_was_active = self.boss.pull_active
+        # thread snap detection: if live count went down, threads were broken
+        live_now = self.boss.live_thread_count
+        if live_now < self._prev_thread_count:
+            for _ in range(self._prev_thread_count - live_now):
+                SoundSystem.play("thread_snap", volume_mod=0.7)
+        self._prev_thread_count = live_now
         # complete any newly woven player-anchored threads
         self.boss.complete_player_anchored_thread(self.player)
         # queued secondary skills
@@ -680,6 +778,7 @@ class Game:
                 fx, fy, (220, 170, 250),
                 count=10, speed=2.0, size=3, life=18,
             )
+            SoundSystem.play("fated_strike_warn")
         if self.boss.weft_pulse_request:
             self.boss.weft_pulse_request = False
             # capture current thread endpoints at the moment of cast
@@ -691,9 +790,13 @@ class Game:
                 self.weft_pulses.append(WeftPulse(lines))
                 self.shake = max(self.shake, 4)
                 self.hud.toast("She tightens the weft!", (220, 180, 240), 55)
+                SoundSystem.play("weft_pulse")
         # advance fated strikes
         for fs in self.weaver_strikes:
+            prev_phase = fs.phase
             fs.update()
+            if prev_phase == "warning" and fs.phase == "impact":
+                SoundSystem.play("fated_strike_impact")
             if fs.alive and not fs.has_hit and fs.hits_player(self.player):
                 if self.player.take_hit(1):
                     fs.has_hit = True
@@ -702,6 +805,7 @@ class Game:
                         self.player.x, self.player.y, (200, 130, 240),
                         count=16, speed=3.2,
                     )
+                    SoundSystem.play("player_hit")
         self.weaver_strikes = [fs for fs in self.weaver_strikes if fs.alive]
         # advance weft pulses
         for wp in self.weft_pulses:
@@ -714,6 +818,7 @@ class Game:
                         self.player.x, self.player.y, (255, 160, 230),
                         count=14, speed=3.0,
                     )
+                    SoundSystem.play("player_hit")
         self.weft_pulses = [wp for wp in self.weft_pulses if wp.alive]
         # pull attack - damage if on the pull line during dash
         line_rect = self.boss.pull_line_rect()
@@ -724,6 +829,7 @@ class Game:
                     self.player.x, self.player.y, (255, 120, 120),
                     count=14, speed=3.0,
                 )
+                SoundSystem.play("player_hit")
         # player sword -> boss or threads (weavers AND threads are hittable)
         arect = self.player.attack_rect()
         if arect is not None:
@@ -731,6 +837,8 @@ class Game:
                 result = self.boss.receive_player_hit(C.PLAYER_ATTACK_DAMAGE)
                 self.player.attack_hit_set.add(id(self.boss))
                 self.hits_landed += 1
+                # weaving a new thread on hit -> pluck SFX
+                SoundSystem.play("thread_weave", volume_mod=0.7)
                 if result["dealt"] == 0:
                     self.hud.toast("Her threads absorb the strike.", (220, 180, 240), 60)
                     self.particles.spawn_burst(
@@ -743,6 +851,7 @@ class Game:
                         count=14, speed=3.0,
                     )
                     self.shake = max(self.shake, 3)
+                    SoundSystem.play("boss_hit")
             # threads - attackable to strip defense
             for t in self.boss.threads:
                 if not t.alive:
@@ -771,6 +880,7 @@ class Game:
         """Echo Lord: snapshots, cascade chain, memory surge."""
         # spawn snapshots from player history
         if self.boss.echo_spawn_request > 0:
+            spawned = 0
             for _ in range(self.boss.echo_spawn_request):
                 if len(self.echo_snapshots) >= C.ECHO_MAX_ON_FIELD:
                     break
@@ -781,7 +891,10 @@ class Game:
                 entry = hist[idx]
                 px, py, facing = entry if len(entry) == 3 else (entry[0], entry[1], self.player.facing)
                 self.echo_snapshots.append(EchoSnapshot(px, py, facing))
+                spawned += 1
             self.boss.echo_spawn_request = 0
+            if spawned > 0:
+                SoundSystem.play("echo_spawn")
         # Cascade Echo: 4 snapshots spread across history, staggered warnings
         if self.boss.cascade_request:
             self.boss.cascade_request = False
@@ -797,7 +910,6 @@ class Game:
                         else (entry[0], entry[1], self.player.facing)
                     )
                     e = EchoSnapshot(px, py, facing)
-                    # stagger the warning start so they fire in sequence
                     e.timer = C.ECHO_WARNING_FRAMES + i * C.CASCADE_ECHO_STAGGER
                     self.echo_snapshots.append(e)
                 self.hud.toast("Echo cascade!", (255, 160, 180), 55)
@@ -806,6 +918,7 @@ class Game:
                     count=22, speed=3.2, size=3, life=24,
                 )
                 self.shake = max(self.shake, 5)
+                SoundSystem.play("cascade")
         # Memory Surge: when telegraph completes, force every echo in warning
         # state to immediately begin slashing.
         if self.boss.memory_surge_active:
@@ -824,9 +937,14 @@ class Game:
                     self.boss.x, self.boss.y - 20, (255, 80, 120),
                     count=30, speed=4.2, size=4, life=28,
                 )
+                SoundSystem.play("memory_surge")
         # advance snapshots
         for e in self.echo_snapshots:
+            prev_state = e.state
             e.update()
+            # warning -> slash transition plays the slash SFX
+            if prev_state == "warning" and e.state == "slash":
+                SoundSystem.play("echo_slash", volume_mod=0.7)
             if e.state == "slash" and not e.has_hit:
                 sr = e.slash_rect()
                 if sr is not None and sr.colliderect(self.player.rect):
@@ -837,7 +955,11 @@ class Game:
                             self.player.x, self.player.y, (255, 120, 140),
                             count=12, speed=3.0,
                         )
+                        SoundSystem.play("player_hit")
         self.echo_snapshots = [e for e in self.echo_snapshots if e.alive]
+        # Memory Surge telegraph - play the low warning rumble as it starts
+        if self.boss.memory_surge_timer == C.MEMORY_SURGE_TELEGRAPH - 1:
+            SoundSystem.play("echo_warn", volume_mod=0.9)
         # player sword -> boss
         arect = self.player.attack_rect()
         if arect is not None:
@@ -850,6 +972,7 @@ class Game:
                     count=14, speed=3.0,
                 )
                 self.shake = max(self.shake, 3)
+                SoundSystem.play("boss_hit")
 
     def _update_fight(self):
         keys = pygame.key.get_pressed()
@@ -1050,10 +1173,14 @@ class Game:
             self.result_timer = 120
             self.particles.spawn_ring(self.boss.x, self.boss.y - 16, C.GOLD, count=40, speed=5.0, life=40)
             self.shake = 18
+            SoundSystem.play("boss_death")
+            SoundSystem.stop_music(fade_ms=900)
         elif self.player.hp <= 0:
             self.state = "lose"
             self.result_timer = 120
             self.particles.spawn_burst(self.player.x, self.player.y, C.BLOOD, count=40, speed=3.5, life=36)
+            SoundSystem.play("player_death")
+            SoundSystem.stop_music(fade_ms=600)
 
     # ---------- rendering ----------
 
